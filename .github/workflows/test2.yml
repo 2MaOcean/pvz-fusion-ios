@@ -1,0 +1,9 @@
+name: Test macos runners
+on: workflow_dispatch
+jobs:
+  m15:
+    runs-on: macos-15
+    steps: [{run: "echo macos-15 ok"}]
+  mlatest:
+    runs-on: macos-latest
+    steps: [{run: "echo macos-latest ok"}]
