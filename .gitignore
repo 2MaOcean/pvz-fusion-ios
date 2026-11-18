@@ -1,0 +1,6 @@
+build/
+*.dylib
+*.ipa
+*.o
+.DS_Store
+base.ipa

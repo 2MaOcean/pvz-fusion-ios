@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 键: image_keyword  主镜像名关键字 -->
+    <!-- 键: poll_ms        数值锁定轮询间隔 -->
+    <!-- 每个功能: enabled / value / symbol / offset / field_offset / patch_hex -->
+    <!--   symbol : 移植版导出的全局对象或函数名（优先） -->
+    <!--   offset : 相对主镜像基址的偏移 -->
+    <!--   field_offset : 非零时先解引用再偏移（堆对象字段） -->
+    <!--   patch_hex : TrollStore/越狱 下的 __TEXT 机器码补丁 -->
+    <key>image_keyword</key>
+    <string>PvZ</string>
+    <key>poll_ms</key>
+    <integer>100</integer>
+
+    <key>sun</key>
+    <dict>
+        <key>enabled</key><true/>
+        <key>value</key><integer>9990</integer>
+        <!-- 示例：移植版若导出全局金钱对象
+        <key>symbol</key><string>gLawnApp</string>
+        <key>field_offset</key><integer>0x94</integer>
+        -->
+    </dict>
+
+    <key>coins</key>
+    <dict>
+        <key>enabled</key><false/>
+        <key>value</key><integer>99999</integer>
+    </dict>
+
+    <key>cooldown</key>
+    <dict>
+        <key>enabled</key><false/>
+        <!-- 示例：无冷却入口函数 -> ret 桩
+        <key>symbol</key><string>SeedBank_UpdateCooldown</string>
+        -->
+    </dict>
+
+    <key>no_drop</key>
+    <dict>
+        <key>enabled</key><false/>
+    </dict>
+</dict>
+</plist>
