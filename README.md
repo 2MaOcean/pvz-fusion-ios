@@ -6,6 +6,31 @@ iOS / iPadOS 移植工程，附带一个**免越狱可用的修改器 dylib**。
 > ⚠️ 仅供个人学习研究。融合版包含 PopCap/EA 的版权素材，
 > 请勿公开分发 ipa / 资源包，本仓库只包含代码与脚本。
 
+## 当前状态（2026-11-20 交接）
+
+| 项 | 状态 |
+|----|------|
+| 修改器 dylib（Unity il2cpp 反射式，版本无关） | ✅ v0.3.2 已发布（[Releases]） |
+| 基座 2.0.4b1 分析（Unity 2022.3 il2cpp 复刻版） | ✅ 完成，见 port/PLAN-baseline.md |
+| 可安装 ipa（基座+修改器+阳光锁定 9990） | ✅ 已产出（本地产出，不入库） |
+| 真机验证（GameAPP.Sun 字段名确认） | ⏳ 等测试者反馈 pvztweak.log |
+| 升级到融合版最新版（3.9+）内容 | ⏳ 等新版 iOS 基座或 PC 最新版资源包 |
+
+### 继续此项目的操作路径
+
+1. **验证修改器**：TrollStore/Sideloadly 装包 → 看阳光是否 9990；
+   不生效则读取 App 沙盒 `Documents/pvztweak.log`，按内容调整 Offsets.plist
+2. **升级内容**：拿到 PC 最新版后，对比 LawnStrings JSON 植物清单差异，
+   新增条目补 JSON + 对应贴图（resources.assets/resS 替换，UnityPy 工具链见 tools/）
+3. **新增行为**：il2cpp AOT 限制下，新植物复用相似行为类 + 换资源；
+   全新机制需 hook（TrollStore 下可写 __TEXT）
+
+### 本机开发环境备忘（DSH 手机端）
+
+- UnityPy：源码包解压至 /opt/pylibs，`PYTHONPATH=/opt/pylibs` 运行
+- zig 交叉编译：`pip install ziglang`，`bash tweak/build.sh`
+- GitHub 通道：api.github.com + ssh.github.com:443（主站直连不通）
+
 ## 现实说明（先读这个）
 
 融合版本体是 **Windows 32 位程序**（基于原版 PvZ 引擎魔改，闭源），
