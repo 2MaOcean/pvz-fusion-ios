@@ -22,13 +22,22 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: 安装工具链（zig 交叉 + macholib + ldid）
+      - name: 安装工具链（zig 交叉 + ldid）
         run: |
           pip install ziglang
-          sudo apt-get update -qq && sudo apt-get install -y -qq libssl-dev
-          git clone --depth 1 https://github.com/osy/ldid.git ldid-src
-          make -C ldid-src -j4
-          sudo cp ldid-src/ldid /usr/local/bin/ && ldid -V || true
+          # ldid：优先 Procursus 预编译二进制，失败则源码编译
+          curl -sL --max-time 60 -o /tmp/ldid \
+            https://github.com/ProcursusTeam/ldid/releases/latest/download/ldid_linux_x86_64 || true
+          if file /tmp/ldid | grep -q ELF; then
+            sudo install -m 755 /tmp/ldid /usr/local/bin/ldid
+          else
+            echo "预编译不可用，改为源码编译"
+            sudo apt-get update -qq && sudo apt-get install -y -qq libssl-dev g++
+            git clone --depth 1 https://github.com/ProcursusTeam/ldid.git ldid-src
+            make -C ldid-src -j4
+            sudo cp ldid-src/ldid /usr/local/bin/
+          fi
+          ldid -V || true
 
       - name: 编译 dylib（arm64）
         run: bash tweak/build.sh
