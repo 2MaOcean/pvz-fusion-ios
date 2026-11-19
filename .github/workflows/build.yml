@@ -34,12 +34,14 @@ jobs:
         run: bash tweak/build.sh
 
       - name: 验证产物
-        run: python3 -c "
+        run: |
+          python3 -c '
           import struct
-          d = open('tweak/build/PvzFusionTweak.dylib','rb').read(20)
-          magic, cpu, _, ft = struct.unpack('<IiiI', d[:16])
-          assert magic == 0xFEEDFACF and (cpu & 0xFFFFFF) == 12 and ft == 6, '产物异常'
-          print('OK: arm64 Mach-O dylib')"
+          d = open("tweak/build/PvzFusionTweak.dylib","rb").read(20)
+          magic, cpu, _, ft = struct.unpack("<IiiI", d[:16])
+          assert magic == 0xFEEDFACF and (cpu & 0xFFFFFF) == 12 and ft == 6, "bad output"
+          print("OK: arm64 Mach-O dylib")
+          '
 
       - name: 注入基座 ipa（可选）
         if: ${{ inputs.base_ipa_url != '' }}
