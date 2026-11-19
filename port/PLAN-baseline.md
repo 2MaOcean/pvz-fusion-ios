@@ -54,12 +54,16 @@ python3 tools/analyze_base.py <base.ipa>
 2. 基座未 strip：dylib hook 行为函数实现新机制（复用本仓库 tweak/）
 3. 全无：二进制级 patch（TrollStore 场景）
 
-## 第 4 步：打包
+## 第 4 步：打包（已验证可产出 ✅ 2026-11-20）
 
-```bash
-python3 packaging/inject_dylib.py base.ipa tweak/build/PvzFusionTweak.dylib PvzFusion-full.ipa
-```
-Sideloadly/AltStore/TrollStore 安装。
+实际流水线（本机已跑通）：
+1. 解包基座 ipa → 删除旧 H5GG 修改器（`Unlimted Sun.dylib` / `Tg@TrollStoreKios.dylib`），
+   用 `.troll-fools.bak` 恢复原始主二进制
+2. 复制 `tweak/build/PvzFusionTweak.dylib` 与 `tweak/assets/Offsets.plist` 进 .app
+3. `python3 packaging/inject_dylib.py` 注入 LC_LOAD_DYLIB（验证：引用存在、ncmds 递增）
+4. 重打包 ipa → TrollStore / Sideloadly 安装（安装器自动重签，无需本地 ldid）
+
+产出：`PvzFusion-iOS-v0.3.1-tweak.ipa`（151MB，阳光锁定 9990 配置预置）
 
 ## 里程碑
 
