@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")"
 mkdir -p build
 
-SRCS="src/tweak_main.c src/hook.c src/config.c src/modules.c"
+SRCS="src/tweak_main.c src/hook.c src/config.c src/modules.c src/unity_tweak.c"
 OUT="build/PvzFusionTweak.dylib"
 
 if command -v xcrun >/dev/null 2>&1 && xcrun --sdk iphoneos --show-sdk-path >/dev/null 2>&1; then

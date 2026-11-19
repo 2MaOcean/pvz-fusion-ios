@@ -42,5 +42,18 @@
     <dict>
         <key>enabled</key><false/>
     </dict>
+
+    <!-- Unity il2cpp 基座（反射式，版本无关）：
+         配置存在时走 unity_worker，legacy 字段忽略 -->
+    <key>unity</key>
+    <array>
+        <dict>
+            <key>class</key><string>GameAPP</string>
+            <key>field</key><string>Sun</string>
+            <key>type</key><string>int</string>
+            <key>value</key><integer>9990</integer>
+            <key>poll_ms</key><integer>300</integer>
+        </dict>
+    </array>
 </dict>
 </plist>

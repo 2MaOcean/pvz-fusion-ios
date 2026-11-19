@@ -16,6 +16,11 @@ static void tweak_entry(void) {
     pthread_t th;
     TweakConfig *heap = malloc(sizeof(cfg));
     *heap = cfg;
+    if (cfg.unity_count > 0) {
+        if (pthread_create(&th, NULL, unity_worker, heap) == 0)
+            pthread_detach(th);
+        return;
+    }
     if (pthread_create(&th, NULL, tweak_worker, heap) == 0)
         pthread_detach(th);
 }

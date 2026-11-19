@@ -23,13 +23,18 @@ extern unsigned long strlen(const char *);
 extern void *malloc(unsigned long);
 extern void free(void *);
 extern int usleep(unsigned int);
+extern long strtol(const char *, char **, int);
+extern int snprintf(char *, unsigned long, const char *, ...);
 
 typedef void *pthread_t;
 extern int pthread_create(pthread_t *, const void *, void *(*)(void *), void *);
 extern int pthread_detach(pthread_t);
 
 extern void *dlsym(void *, const char *);
+extern void *dlopen(const char *, int);
 #define RTLD_DEFAULT ((void *)-2)
+#define RTLD_LAZY   1
+#define RTLD_GLOBAL 0x100
 
 // ---- 基础 Mach 类型 ----
 typedef int32_t   kern_return_t;
@@ -133,6 +138,7 @@ typedef const struct __CFData       *CFDataRef;
 typedef const struct __CFURL        *CFURLRef;
 typedef const void                  *CFPropertyListRef;
 typedef const struct __CFNumber     *CFNumberRef;
+typedef const struct __CFArray      *CFArrayRef;
 typedef const struct __CFBoolean    *CFBooleanRef;
 typedef struct __CFError            *CFErrorRef;
 typedef struct __CFBundle           *CFBundleRef;
@@ -158,6 +164,9 @@ extern CFTypeID CFNumberGetTypeID(void);
 extern Boolean CFBooleanGetValue(CFBooleanRef boolean);
 extern Boolean CFNumberGetValue(CFNumberRef number, long theType, void *valuePtr);
 extern void CFRelease(CFTypeRef cf);
+extern CFIndex CFArrayGetCount(CFArrayRef theArray);
+extern const void *CFArrayGetValueAtIndex(CFArrayRef theArray, CFIndex idx);
+extern CFTypeID CFArrayGetTypeID(void);
 extern CFBundleRef CFBundleGetMainBundle(void);
 extern CFURLRef CFBundleCopyResourcesDirectoryURL(CFBundleRef bundle);
 extern CFURLRef CFURLCreateCopyAppendingPathComponent(CFAllocatorRef allocator,

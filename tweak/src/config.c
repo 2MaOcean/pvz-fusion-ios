@@ -138,6 +138,54 @@ bool config_load(TweakConfig *cfg) {
     }
     CFRelease(ks);
 
+    // unity: [{class, ns?, field, type?, value, poll_ms?}, ...]
+    {
+        const void *vp = NULL;
+        ks = CFStringCreateWithCString(NULL, "unity", kCFStringEncodingUTF8);
+        if (CFDictionaryGetValueIfPresent(root, ks, &vp) && vp &&
+            CFGetTypeID(vp) == CFArrayGetTypeID()) {
+            CFArrayRef arr = (CFArrayRef)vp;
+            CFTypeID arrT = CFArrayGetTypeID();
+            (void)arrT;
+            CFIndex n_items = CFArrayGetCount(arr);
+            for (CFIndex i = 0; i < n_items && cfg->unity_count < 8; i++) {
+                CFDictionaryRef item = (CFDictionaryRef)CFArrayGetValueAtIndex(arr, i);
+                if (!item || CFGetTypeID(item) != CFDictionaryGetTypeID()) continue;
+                struct { const char *key; char *dst; size_t sz; } strs[] = {
+                    {"class", cfg->unity[i].klass, 64},
+                    {"ns", cfg->unity[i].ns, 64},
+                    {"field", cfg->unity[i].field, 64},
+                    {"type", cfg->unity[i].type, 16},
+                };
+                for (unsigned u = 0; u < 4; u++) {
+                    CFStringRef k2 = CFStringCreateWithCString(NULL, strs[u].key, kCFStringEncodingUTF8);
+                    const void *v2 = NULL;
+                    if (CFDictionaryGetValueIfPresent(item, k2, &v2) && v2 &&
+                        CFGetTypeID(v2) == CFStringGetTypeID())
+                        CFStringGetCString((CFStringRef)v2, strs[u].dst, (CFIndex)strs[u].sz, kCFStringEncodingUTF8);
+                    CFRelease(k2);
+                }
+                // value: number 或 string
+                long val = 0;
+                CFStringRef k2 = CFStringCreateWithCString(NULL, "value", kCFStringEncodingUTF8);
+                const void *v2 = NULL;
+                if (CFDictionaryGetValueIfPresent(item, k2, &v2) && v2) {
+                    if (CFGetTypeID(v2) == CFNumberGetTypeID()) {
+                        SInt64 nn; CFNumberGetValue((CFNumberRef)v2, kCFNumberSInt64Type, &nn); val = (long)nn;
+                    } else if (CFGetTypeID(v2) == CFStringGetTypeID()) {
+                        char buf[32]; CFStringGetCString((CFStringRef)v2, buf, 32, kCFStringEncodingUTF8);
+                        val = strtol(buf, NULL, 0);
+                    }
+                }
+                CFRelease(k2);
+                snprintf(cfg->unity[i].value_s, sizeof(cfg->unity[i].value_s), "%ld", val);
+                cfg->unity[i].poll_ms = 300;
+                cfg->unity_count++;
+            }
+        }
+        CFRelease(ks);
+    }
+
     CFRelease(pl);
     return true;
 }
