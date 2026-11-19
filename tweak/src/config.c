@@ -1,8 +1,6 @@
 // config.c — 读取 App bundle 内 Offsets.plist（纯 CoreFoundation，无 ObjC）
 #include "pvz_tweak.h"
-#include <CoreFoundation/CoreFoundation.h>
-#include <dlfcn.h>
-#include <string.h>
+#include "mach_compat.h"   // CF / libc no-SDK 声明
 
 // bundle 内路径：用 CFBundleCopyResourcesDirectoryURL（C API）
 static CFURLRef bundle_resource_dir(void) {
@@ -32,13 +30,17 @@ static void fill_feature(CFDictionaryRef parent, const char *key,
     SInt64 n;
 
     ks = CFStringCreateWithCString(NULL, "enabled", kCFStringEncodingUTF8);
-    if (CFDictionaryGetValueIfPresent(d, ks, (const void **)&b) && CFGetTypeID(b) == CFBooleanGetTypeID())
-        f->enabled = CFBooleanGetValue(b);
+    const void *vp = NULL;
+    if (CFDictionaryGetValueIfPresent(d, ks, &vp) && vp &&
+        CFGetTypeID((CFTypeRef)vp) == CFBooleanGetTypeID())
+        f->enabled = CFBooleanGetValue((CFBooleanRef)vp);
     CFRelease(ks);
 
     ks = CFStringCreateWithCString(NULL, "value", kCFStringEncodingUTF8);
-    if (CFDictionaryGetValueIfPresent(d, ks, (const void **)&n) && CFGetTypeID(n) == CFNumberGetTypeID())
-        CFNumberGetValue(n, kCFNumberSInt64Type, &f->value);
+    vp = NULL;
+    if (CFDictionaryGetValueIfPresent(d, ks, &vp) && vp &&
+        CFGetTypeID((CFTypeRef)vp) == CFNumberGetTypeID())
+        CFNumberGetValue((CFNumberRef)vp, kCFNumberSInt64Type, &f->value);
     CFRelease(ks);
 
     struct { const char *k; char *dst; size_t sz; } strs[] = {
@@ -47,9 +49,10 @@ static void fill_feature(CFDictionaryRef parent, const char *key,
     };
     for (unsigned i = 0; i < 2; i++) {
         ks = CFStringCreateWithCString(NULL, strs[i].k, kCFStringEncodingUTF8);
-        CFStringRef v;
-        if (CFDictionaryGetValueIfPresent(d, ks, (const void **)&v) && CFGetTypeID(v) == CFStringGetTypeID())
-            CFStringGetCString(v, strs[i].dst, (CFIndex)strs[i].sz, kCFStringEncodingUTF8);
+        vp = NULL;
+        if (CFDictionaryGetValueIfPresent(d, ks, &vp) && vp &&
+            CFGetTypeID((CFTypeRef)vp) == CFStringGetTypeID())
+            CFStringGetCString((CFStringRef)vp, strs[i].dst, (CFIndex)strs[i].sz, kCFStringEncodingUTF8);
         CFRelease(ks);
     }
 
@@ -58,8 +61,12 @@ static void fill_feature(CFDictionaryRef parent, const char *key,
     };
     for (unsigned i = 0; i < 2; i++) {
         ks = CFStringCreateWithCString(NULL, nums[i].k, kCFStringEncodingUTF8);
-        if (CFDictionaryGetValueIfPresent(d, ks, (const void **)&n) && CFGetTypeID(n) == CFNumberGetTypeID()) {
-            SInt64 v; CFNumberGetValue(n, kCFNumberSInt64Type, &v); *nums[i].dst = (long)v;
+        vp = NULL;
+        if (CFDictionaryGetValueIfPresent(d, ks, &vp) && vp &&
+            CFGetTypeID((CFTypeRef)vp) == CFNumberGetTypeID()) {
+            SInt64 v = 0;
+            CFNumberGetValue((CFNumberRef)vp, kCFNumberSInt64Type, &v);
+            *nums[i].dst = (long)v;
         }
         CFRelease(ks);
     }

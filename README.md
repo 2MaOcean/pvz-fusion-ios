@@ -32,18 +32,25 @@ dylib 设计为**非越狱侧载**场景：通过 [insert_dylib] 打进 ipa，
 1. 到 [Releases] 下载 `PvzFusionTweak.dylib`（或带基座的 ipa）
 2. 电脑上用 [Sideloadly] / AltStore / TrollStore 把 ipa 装进 iPhone/iPad
    - 或：把 dylib 注入你自己已有的 PvZ iOS 基座 ipa：
-     `./packaging/make_ipa.sh base.ipa PvzFusionTweak.dylib out.ipa`
+     `python3 packaging/inject_dylib.py base.ipa PvzFusionTweak.dylib out.ipa`
+     （脚本在 Linux/macOS 均可运行，安装时由 Sideloadly/TrollStore 完成重签）
 3. 首次打开需信任开发者证书：设置 → 通用 → VPN与设备管理
 
 ## 开发者构建
 
-- 本地（需要 macOS + Xcode）：
+- 任意平台（推荐，无需 Mac/iOS SDK）：
   ```bash
-  cd tweak && make          # 产出 build/PvzFusionTweak.dylib
+  pip install ziglang        # zig 交叉工具链
+  bash tweak/build.sh        # 产出 tweak/build/PvzFusionTweak.dylib
   ```
-- 无 Mac：推送到 GitHub 后
-  `Actions → Build tweak → Run workflow`，
-  macOS runner 云端编译并上传 artifact / Release。
+  原理：`zig cc -target aarch64-macos -dynamiclib -undefined dynamic_lookup`，
+  系统框架符号在 iOS 运行时由 dyld 绑定（no-SDK 构建）。
+- macOS + Xcode：同样 `bash tweak/build.sh` 自动走 Xcode 路径。
+- 纯云端：推送后 `Actions → Build tweak & package → Run workflow`，
+  ubuntu runner 完成 zig 交叉编译 + ldid 伪签 + artifact/Release。
+
+> 注：本仓库曾因 GitHub 对账号的 macOS runner 风控限制改用 ubuntu + zig 方案，
+> 若你的账号可用 macOS runner，可把 workflow 的 `runs-on` 改回 `macos-15`。
 
 ## 目录结构
 

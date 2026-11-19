@@ -1,19 +1,9 @@
 // hook.c — 内存读写 / 符号定位 / 补丁原语（arm64 iOS）
 // 非越狱：仅写堆与 __DATA/__DATA_CONST；越狱或 TrollStore（amfi 降级）可写 __TEXT。
+#include "tweak_main.h"
 #include "pvz_tweak.h"
-
-#include <mach/mach.h>
-#include <mach-o/dyld.h>
-#include <mach-o/getsect.h>
-#include <mach-o/loader.h>
-#include <mach-o/nlist.h>
-#include <dlfcn.h>
-#include <libkern/OSCacheControl.h>
-#include <pthread.h>
+#include "mach_compat.h"
 #include <stdarg.h>
-#include <stdio.h>
-#include <string.h>
-#include <sys/mman.h>
 
 void tweak_log(const char *fmt, ...) {
     va_list ap;
@@ -36,7 +26,6 @@ uintptr_t mem_image_base(const char *keyword) {
 
 // ---------- 符号定位 ----------
 // 优先 dlsym（移植版若导出符号），否则扫描镜像 symtab。
-// 返回运行时地址（含 ASLR slide）。
 void *mem_find_symbol(const char *image_keyword, const char *symbol) {
     if (!symbol || !symbol[0]) return NULL;
 
@@ -93,7 +82,9 @@ void *mem_find_symbol(const char *image_keyword, const char *symbol) {
     return NULL;
 }
 
-// ---------- 页级写内存（保留原页属性） ----------
+// ---------- 页级写内存 ----------
+// 先试 +VM_PROT_COPY（写时复制，任意页可用），失败再直接 +W。
+// 写完尽力恢复为 R|X；数据页恢复失败无副作用。
 static kern_return_t vm_write_range(uintptr_t addr, const void *data, size_t len, bool code) {
     mach_port_t self = mach_task_self();
     const vm_size_t page = 4096;
@@ -105,28 +96,19 @@ static kern_return_t vm_write_range(uintptr_t addr, const void *data, size_t len
         uintptr_t page_end = page_start + page;
         size_t chunk = (end < page_end ? end : page_end) - cur;
 
-        // 查询本页所在 region 的当前/最大保护属性
-        vm_address_t rbase = (vm_address_t)page_start;
-        vm_size_t rsize = 0;
-        vm_region_basic_info_data_64_t info;
-        mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64;
-        mach_port_t obj = MACH_PORT_NULL;
-        vm_prot_t saved = VM_PROT_READ;
-        if (mach_vm_region(self, &rbase, &rsize, VM_REGION_BASIC_INFO_64,
-                           (vm_region_info_t)&info, &cnt, &obj) == KERN_SUCCESS) {
-            saved = info.protection;
-            if (obj != MACH_PORT_NULL) mach_port_deallocate(self, obj);
-        }
-
         kern_return_t kr = vm_protect(self, (vm_address_t)page_start, page, 0,
-                                      saved | VM_PROT_WRITE);
+                                      VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+        if (kr != KERN_SUCCESS)
+            kr = vm_protect(self, (vm_address_t)page_start, page, 0,
+                            VM_PROT_READ | VM_PROT_WRITE);
         if (kr != KERN_SUCCESS) {
             TWEAK_LOG("vm_protect(+W) failed @0x%lx kr=%d (sandboxed __TEXT?)",
                       (unsigned long)page_start, kr);
             return kr;
         }
         memcpy((void *)cur, src, chunk);
-        vm_protect(self, (vm_address_t)page_start, page, 0, saved);
+        vm_protect(self, (vm_address_t)page_start, page, 0,
+                   VM_PROT_READ | VM_PROT_EXECUTE);
         if (code) sys_icache_invalidate((void *)cur, chunk);
 
         cur += chunk;

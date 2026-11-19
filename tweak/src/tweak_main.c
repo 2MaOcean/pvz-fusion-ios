@@ -1,12 +1,7 @@
 // tweak_main.c — dylib 入口：加载配置 → 等游戏镜像 → 应用补丁 → 启动锁定线程
 #include "tweak_main.h"
 #include "pvz_tweak.h"
-
-#include <pthread.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <unistd.h>
+#include "mach_compat.h"
 
 __attribute__((constructor))
 static void tweak_entry(void) {

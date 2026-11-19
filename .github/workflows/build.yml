@@ -12,24 +12,41 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装 ldid
-        run: brew install ldid
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-      - name: 编译 dylib
-        run: make -C tweak
+      - name: 安装工具链（zig 交叉 + macholib + ldid）
+        run: |
+          pip install ziglang
+          sudo apt-get update -qq && sudo apt-get install -y -qq libssl-dev
+          git clone --depth 1 https://github.com/osy/ldid.git ldid-src
+          make -C ldid-src -j4
+          sudo cp ldid-src/ldid /usr/local/bin/ && ldid -V || true
+
+      - name: 编译 dylib（arm64）
+        run: bash tweak/build.sh
+
+      - name: 验证产物
+        run: python3 -c "
+          import struct
+          d = open('tweak/build/PvzFusionTweak.dylib','rb').read(20)
+          magic, cpu, _, ft = struct.unpack('<IiiI', d[:16])
+          assert magic == 0xFEEDFACF and (cpu & 0xFFFFFF) == 12 and ft == 6, '产物异常'
+          print('OK: arm64 Mach-O dylib')"
 
       - name: 注入基座 ipa（可选）
         if: ${{ inputs.base_ipa_url != '' }}
         run: |
           curl -L -o base.ipa "${{ inputs.base_ipa_url }}"
-          chmod +x packaging/make_ipa.sh
-          ./packaging/make_ipa.sh base.ipa tweak/build/PvzFusionTweak.dylib PvzFusion-iOS.ipa
+          pip install python3-macholib || true
+          python3 packaging/inject_dylib.py base.ipa tweak/build/PvzFusionTweak.dylib PvzFusion-iOS.ipa
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
@@ -38,7 +55,7 @@ jobs:
           path: |
             tweak/build/PvzFusionTweak.dylib
             PvzFusion-iOS.ipa
-          if-no-files-found: ignore
+          if-no-files-found: warn
 
       - name: 发布 Release（tag 推送时）
         if: startsWith(github.ref, 'refs/tags/')
