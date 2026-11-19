@@ -3,17 +3,30 @@
 前提：用户提供一个社区移植的 PvZ iOS 版 ipa 作为**引擎基座**。
 目标：在其上叠加融合版最新版的资源与逻辑，产出完整可玩 ipa。
 
-## 第 0 步：基座判定（拿到 ipa 立即做）
+## 第 0 步：基座判定（已完成 ✅ 2026-11-20）
 
+基座：`植物大战僵尸 融合版_2.0.4b1[ 星].ipa`（161MB，用户提供）
+
+| 维度 | 结果 |
+|------|------|
+| 引擎 | **Unity 2022.3.20f1c1 + il2cpp**（AOT 原生码） |
+| 主程序 | 壳 88KB + UnityFramework 48MB（引擎+游戏逻辑） |
+| Bundle | com.GLESign.PlantsVsZombiesRH，min iOS 10，TrollStore 分发（TrollFools 注入痕迹） |
+| 自带修改器 | H5GG 变种 `Unlimted Sun.dylib`（Web 覆盖 UI + Substrate hook） |
+| 资源结构 | resources.assets 33MB（37694 对象）+ resS 318MB（纹理音频流）+ resources.resource 23MB（音频） |
+| 文本表 | **LawnStrings = JSON**（106 植物图鉴，富文本，数据驱动） |
+| 脚本组件 | MonoScript 1587 全提取；MonoBehaviour 类名分布：AlmanacCard/CardUI/Advanture_Btn/TallNutFootball 等 UI+玩法组件 |
+| 字节序 | **serialized file 为 little-endian**（Unity 2022 特性，解析时必须注意） |
+| 数值层 | 待确认：LawnStrings 仅图鉴文本；真实数值在 il2cpp 代码或未定位的配置（下一步） |
+
+### 解析工具链（本机已验证可用）
 ```bash
-python3 tools/analyze_base.py <base.ipa> base_report.md
+# UnityPy 绕过编译：源码包解压 + 依赖补丁（详见仓库 tools/）
+PYTHONPATH=/opt/pylibs python3 tools/list_assets.py <解包的.app>
+python3 tools/analyze_base.py <base.ipa>
 ```
 
-判定维度：
-- **引擎类型**：Lawn 原版引擎 / SDL / cocos2d / GameMaker / Unity
-- **符号状况**：未 strip（可 dlsym 适配修改器）/ strip（需逆向偏移）
-- **资源形态**：main.pak / 散装 png / properties
-- **架构与版本**：arm64、最低 iOS、是否 PIE、是否加密
+## 第 1 步：融合版素材准备（用户提供或从 PC 版提取）
 
 ## 第 1 步：融合版素材准备（用户提供或从 PC 版提取）
 
