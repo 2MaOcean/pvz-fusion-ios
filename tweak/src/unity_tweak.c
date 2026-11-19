@@ -32,6 +32,16 @@ static int resolve_api(void) {
     void *h = dlopen("@r/UnityFramework.framework/UnityFramework", RTLD_LAZY | RTLD_GLOBAL);
     if (!h) h = dlopen("UnityFramework", RTLD_LAZY | RTLD_GLOBAL);
     if (!h) h = dlopen("@executable_path/Frameworks/UnityFramework.framework/UnityFramework", RTLD_LAZY | RTLD_GLOBAL);
+    if (!h) {
+        // 兜底：枚举已加载镜像，找到 UnityFramework 的真实路径再 dlopen
+        for (uint32_t i = 0; i < _dyld_image_count(); i++) {
+            const char *name = _dyld_get_image_name(i);
+            if (name && strstr(name, "UnityFramework")) {
+                h = dlopen(name, RTLD_LAZY | RTLD_GLOBAL);
+                if (h) { TWEAK_LOG("unity: dlopen via image %s", name); break; }
+            }
+        }
+    }
     if (!h) { TWEAK_LOG("unity: dlopen UnityFramework failed"); return 0; }
     p_domain_get = dlsym(h, "il2cpp_domain_get");
     p_domain_get_assemblies = dlsym(h, "il2cpp_domain_get_assemblies");

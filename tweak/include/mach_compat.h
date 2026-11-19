@@ -13,6 +13,10 @@ typedef struct __sFILE FILE;
 extern FILE *stderr;
 extern int fprintf(FILE *, const char *, ...);
 extern int vfprintf(FILE *, const char *, __builtin_va_list);
+extern int vsnprintf(char *, unsigned long, const char *, __builtin_va_list);
+extern int fclose(FILE *);
+extern FILE *fopen(const char *, const char *);
+extern char *getenv(const char *);
 
 extern void *memcpy(void *, const void *, unsigned long);
 extern void *memset(void *, int, unsigned long);

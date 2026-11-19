@@ -5,12 +5,25 @@
 #include "mach_compat.h"
 #include <stdarg.h>
 
+// 日志：stderr + 追加写沙盒 Documents/pvztweak.log（手机文件 App 可直接查看）
 void tweak_log(const char *fmt, ...) {
+    char buf[1024];
     va_list ap;
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, "\n");
+    vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
+
+    fprintf(stderr, "[PvZTweak] %s\n", buf);
+
+    const char *home = getenv("HOME");
+    if (!home || !home[0]) return;
+    char path[512];
+    snprintf(path, sizeof(path), "%s/Documents/pvztweak.log", home);
+    FILE *f = fopen(path, "a");
+    if (f) {
+        fprintf(f, "%s\n", buf);
+        fclose(f);
+    }
 }
 
 // ---------- 镜像定位 ----------
