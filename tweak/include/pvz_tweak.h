@@ -42,6 +42,8 @@ typedef struct {
     TweakFeature no_drop;   // 植物血量不减（可选，默认关）
     int  unity_count;                       // Unity il2cpp 反射功能数
     UnityFeature unity[UNITY_MAX_FEATURES]; // il2cpp 反射功能表
+    int  probe_count;                       // 字段探测类清单
+    char probe_classes[8][64];              // 如 GameAPP / PlantData
 } TweakConfig;
 
 bool config_load(TweakConfig *cfg);       // 读 bundle 内 Offsets.plist，失败给默认值

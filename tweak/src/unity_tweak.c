@@ -14,6 +14,12 @@ static const char *(*p_image_get_name)(void *);
 static size_t (*p_image_get_class_count)(void *);
 static void *(*p_class_from_name)(void *, const char *, const char *);
 static void *(*p_class_get_field_from_name)(void *, const char *);
+static void *(*p_class_get_fields)(void *, void **);
+static const char *(*p_field_get_name)(void *);
+static int (*p_field_get_flags)(void *);
+static void *(*p_field_get_type)(void *);
+static const char *(*p_type_get_name)(void *);
+static void (*p_free)(void *);
 static void (*p_field_static_get_value)(void *, void *);
 static void (*p_field_static_set_value)(void *, void *, void *);
 
@@ -33,6 +39,12 @@ static int resolve_api(void) {
     p_image_get_class_count = dlsym(h, "il2cpp_image_get_class_count");
     p_class_from_name = dlsym(h, "il2cpp_class_from_name");
     p_class_get_field_from_name = dlsym(h, "il2cpp_class_get_field_from_name");
+    p_class_get_fields = dlsym(h, "il2cpp_class_get_fields");
+    p_field_get_name = dlsym(h, "il2cpp_field_get_name");
+    p_field_get_flags = dlsym(h, "il2cpp_field_get_flags");
+    p_field_get_type = dlsym(h, "il2cpp_field_get_type");
+    p_type_get_name = dlsym(h, "il2cpp_type_get_name");
+    p_free = dlsym(h, "il2cpp_free");
     p_field_static_get_value = dlsym(h, "il2cpp_field_static_get_value");
     p_field_static_set_value = dlsym(h, "il2cpp_field_static_set_value");
     if (!api_ready()) { TWEAK_LOG("unity: il2cpp api incomplete"); return 0; }
@@ -57,6 +69,29 @@ static long parse_value(const char *s) {
     return s ? strtol(s, NULL, 0) : 0;
 }
 
+// 字段探测：枚举指定类全部字段（名字/类型/偏移/是否静态），写入日志后返回
+static void probe_class(void *image, const char *name) {
+    if (!p_class_get_fields || !p_field_get_name) { TWEAK_LOG("probe: api missing"); return; }
+    void *klass = p_class_from_name(image, "", name);
+    if (!klass) { TWEAK_LOG("probe: class %s not found", name); return; }
+    TWEAK_LOG("===== probe %s =====", name);
+    void *iter = NULL;
+    void *field;
+    int count = 0;
+    while ((field = p_class_get_fields(klass, &iter)) != NULL && count < 200) {
+        const char *fname = p_field_get_name(field);
+        int flags = p_field_get_flags ? p_field_get_flags(field) : 0;
+        const char *ftype = "?";
+        if (p_field_get_type && p_type_get_name && p_free) {
+            void *t = p_field_get_type(field);
+            if (t) { const char *tn = p_type_get_name(t); if (tn) { ftype = tn; } }
+        }
+        TWEAK_LOG("  %s%s : %s", (flags & 0x10) ? "static " : "", fname ? fname : "?", ftype);
+        count++;
+    }
+    TWEAK_LOG("===== probe %s end (%d fields) =====", name, count);
+}
+
 void *unity_worker(void *arg) {
     TweakConfig *cfg = arg;
     // 等 il2cpp 运行时就绪（Unity 初始化较慢）
@@ -74,6 +109,15 @@ void *unity_worker(void *arg) {
     }
     if (!image) { TWEAK_LOG("unity: Assembly-CSharp image not found"); free(cfg); return NULL; }
     TWEAK_LOG("unity: Assembly-CSharp found");
+
+    // 探测模式：枚举字段后退出
+    if (cfg->probe_count > 0) {
+        for (int i = 0; i < cfg->probe_count && i < 8; i++)
+            probe_class(image, cfg->probe_classes[i]);
+        TWEAK_LOG("probe done, exit");
+        free(cfg);
+        return NULL;
+    }
 
     // 逐功能解析字段并锁定
     for (int fi = 0; fi < UNITY_MAX_FEATURES; fi++) {

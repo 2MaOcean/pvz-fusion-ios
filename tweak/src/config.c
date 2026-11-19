@@ -138,6 +138,23 @@ bool config_load(TweakConfig *cfg) {
     }
     CFRelease(ks);
 
+    // unity_probe: ["GameAPP", "PlantData", ...] 枚举字段写日志
+    {
+        const void *vp = NULL;
+        ks = CFStringCreateWithCString(NULL, "unity_probe", kCFStringEncodingUTF8);
+        if (CFDictionaryGetValueIfPresent(root, ks, &vp) && vp &&
+            CFGetTypeID(vp) == CFArrayGetTypeID()) {
+            CFArrayRef arr = (CFArrayRef)vp;
+            CFIndex n_items = CFArrayGetCount(arr);
+            for (CFIndex i = 0; i < n_items && cfg->probe_count < 8; i++) {
+                CFStringRef v = (CFStringRef)CFArrayGetValueAtIndex(arr, i);
+                if (v && CFGetTypeID(v) == CFStringGetTypeID())
+                    CFStringGetCString(v, cfg->probe_classes[cfg->probe_count++], 64, kCFStringEncodingUTF8);
+            }
+        }
+        CFRelease(ks);
+    }
+
     // unity: [{class, ns?, field, type?, value, poll_ms?}, ...]
     {
         const void *vp = NULL;

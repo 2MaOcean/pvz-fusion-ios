@@ -44,7 +44,15 @@
     </dict>
 
     <!-- Unity il2cpp 基座（反射式，版本无关）：
-         配置存在时走 unity_worker，legacy 字段忽略 -->
+         unity_probe: 填类名 → 运行时枚举该类全部字段写入系统日志（用于摸清字段清单），
+         探测模式优先，锁定功能跳过；清空后恢复锁定 -->
+    <key>unity_probe</key>
+    <array>
+        <string>GameAPP</string>
+        <string>PlantData</string>
+    </array>
+
+    <!-- unity: 反射锁定功能表（class.field → value） -->
     <key>unity</key>
     <array>
         <dict>
