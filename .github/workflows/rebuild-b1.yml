@@ -10,10 +10,16 @@ jobs:
     steps:
       - name: 下载 Unity 2021.3.9f1 编辑器 + iOS 模块
         run: |
-          curl -sL --retry 10 --retry-all-errors -o unity.pkg \
-            "https://download.unity3d.com/download_unity/ad3870b89536/MacEditorInstaller/Unity-2021.3.9f1.pkg"
-          curl -sL --retry 10 --retry-all-errors -o ios.pkg \
-            "https://download.unity3d.com/download_unity/ad3870b89536/MacEditorInstaller/UnitySetup-iOS-Support-for-Editor-2021.3.9f1.pkg"
+          fetch() { # $1=输出 $2=URL $3=期望最小字节
+            for i in $(seq 1 15); do
+              curl -sL --max-time 600 -C - -o "$1" "$2" && S=$(stat -f%z "$1") && [ "$S" -gt "$3" ] && echo "$1 OK ($S)" && return 0
+              echo "retry $i size=$(stat -f%z "$1" 2>/dev/null || echo 0)"; sleep 3
+            done
+            echo "$1 download FAILED"; return 1
+          }
+          fetch unity.pkg "https://download.unity3d.com/download_unity/ad3870b89536/MacEditorInstaller/Unity-2021.3.9f1.pkg" 2900000000
+          fetch ios.pkg "https://download.unity3d.com/download_unity/ad3870b89536/MacEditorTargetInstaller/UnitySetup-iOS-Support-for-Editor-2021.3.9f1.pkg" 600000000 || \
+          fetch ios.pkg "https://download.unitychina.cn/download_unity/ad3870b89536/MacEditorTargetInstaller/UnitySetup-iOS-Support-for-Editor-2021.3.9f1.pkg" 600000000
           ls -la unity.pkg ios.pkg
 
       - name: 安装
