@@ -19,6 +19,8 @@ jobs:
         run: |
           curl -sL -o ar.tar.xz "https://github.com/AssetRipper/AssetRipper/releases/download/2.0.0/AssetRipper_mac_arm64.tar.xz"
           mkdir -p ar && tar xf ar.tar.xz -C ar
+          # Apple Silicon 强制签名：对全部可执行与动态库做 ad-hoc 签名
+          find ar -type f \( -perm +111 -o -name "*.dylib" \) -exec codesign --force --sign - {} \; 2>/dev/null || true
           find ar -type f | head -20
 
       - name: 启动 headless 服务
