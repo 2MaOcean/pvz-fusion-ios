@@ -1,0 +1,47 @@
+name: Rebuild 4.1 — Stage A (AssetRipper 逆向)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ripper:
+    runs-on: macos-15
+    timeout-minutes: 240
+    steps:
+      - name: 下载 4.1 源数据
+        run: |
+          curl -sL -o game41.tar "https://github.com/${{ github.repository }}/releases/download/game41-source/game41.tar"
+          mkdir game41 && tar xf game41.tar -C game41 --strip-components=1
+          du -sh game41
+          ls game41
+
+      - name: 下载 AssetRipper (mac arm64)
+        run: |
+          curl -sL -o ar.tar.xz "https://github.com/AssetRipper/AssetRipper/releases/download/2.0.0/AssetRipper_mac_arm64.tar.xz"
+          mkdir -p ar && tar xf ar.tar.xz -C ar
+          find ar -type f -name "*AssetRipper*" | head
+
+      - name: 运行 AssetRipper 导出 Unity 工程
+        run: |
+          cd ar
+          EXE=$(find . -type f -perm +111 | grep -i ripper | head -1)
+          echo "executable: $EXE"
+          # AssetRipper 2.0 CLI: 先看帮助确认参数
+          chmod +x "$EXE"
+          "$EXE" --help 2>&1 | head -40 || true
+
+      - name: 导出 ExportedProject
+        run: |
+          cd ar
+          EXE=$(find . -type f -perm +111 | grep -i ripper | head -1)
+          # CLI 导出（参数以 --help 输出为准，2.0 支持 -i 输入 -o 输出）
+          "$EXE" -i "$GITHUB_WORKSPACE/game41" -o "$GITHUB_WORKSPACE/ExportedProject" || \
+          "$EXE" --input "$GITHUB_WORKSPACE/game41" --output "$GITHUB_WORKSPACE/ExportedProject" || true
+          du -sh "$GITHUB_WORKSPACE/ExportedProject" 2>/dev/null || echo "export failed"
+
+      - name: 上传 ExportedProject
+        uses: actions/upload-artifact@v4
+        with:
+          name: exported-project-41
+          path: ExportedProject
+          retention-days: 7
