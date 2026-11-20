@@ -26,7 +26,30 @@ PYTHONPATH=/opt/pylibs python3 tools/list_assets.py <解包的.app>
 python3 tools/analyze_base.py <base.ipa>
 ```
 
-## 第 1 步：融合版素材准备（用户提供或从 PC 版提取）
+## 4.1 PC 版分析结论（2026-11-20，用户提供 PC 4.1 包后完成）
+
+样本：`植物大战僵尸融合版4.1`（PC Windows 版，1.1GB）
+
+| 维度 | PC 4.1 | iOS 基座 2.0.4b1 | 差异影响 |
+|------|--------|------------------|----------|
+| Unity 引擎 | **2021.3.9f1** | 2022.3.20f1c1 | 序列化格式不同，资源不可直接互换 |
+| il2cpp 元数据 | global-metadata.dat 14MB | 6.7MB | 代码量约 2 倍 |
+| LawnStrings | JSON **751KB** | 74.5KB | 图鉴 742 vs 106 条植物 |
+| data 布局 | data.unity3d 单一压缩 bundle | 散装 assets | 加载路径不同 |
+| 平台 | Windows x64 (GameAssembly.dll) | iOS arm64 (UnityFramework) | 逻辑二进制不可迁移 |
+
+### 内容差异规模
+- 4.1 图鉴 **742 种植物**（2.0.4b1 仅 106——2.0.4 是早期版，连磁力菇/玉米投手等原版植物都没有）
+- 新增 636+ 植物行为类（各一个 .cs）已 AOT 编译进 PC 版 GameAssembly.dll
+
+### 升级可行性结论（重要）
+1. **PC 4.1 资源无法灌入 iOS 2.0.4 基座**：Unity 版本（2021 vs 2022）+ data 布局 + il2cpp 引擎三重不匹配
+2. **新增植物行为代码无法注入**：il2cpp 是 AOT 预编译，636 个新 C# 类不在 iOS arm64 二进制里
+3. **官方无 4.1 iOS 版**（游民星空 4.1 手机版原文：iOS 只能在线玩；社区最新为 2.0.4）
+4. → 「iOS 原生玩 4.1」仅剩两条路：
+   - **官方网页版**（iOS 浏览器直玩，官方提供的在线方式）
+   - **自建 iOS 移植**：需 Mac + Unity 2021.3.9 + AssetRipper 逆向重建工程后出 iOS 构建（月级工程，本工程可提供资产准备与指南，但构建必须在 Mac 完成）
+5. 当前 **2.0.4b1 基座是 iOS 原生可玩的最高版本**，本工程的反射修改器对其完全有效
 
 ## 第 1 步：融合版素材准备（用户提供或从 PC 版提取）
 
