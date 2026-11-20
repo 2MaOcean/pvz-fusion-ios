@@ -28,7 +28,7 @@ jobs:
           cd ar
           EXE=$(find . -type f -perm +111 | grep -i "AssetRipper.GUI" | head -1)
           chmod +x "$EXE"
-          nohup "$EXE" --headless --port 8080 --log false > server.log 2>&1 &
+          nohup "$EXE" --headless --port 8080 > server.log 2>&1 &
           for i in $(seq 1 60); do
             curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/ | grep -q 200 && echo "server up" && break
             sleep 2
