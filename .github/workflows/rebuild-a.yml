@@ -6,7 +6,7 @@ on:
 jobs:
   ripper:
     runs-on: macos-15
-    timeout-minutes: 240
+    timeout-minutes: 300
     steps:
       - name: 下载 4.1 源数据
         run: |
@@ -19,25 +19,34 @@ jobs:
         run: |
           curl -sL -o ar.tar.xz "https://github.com/AssetRipper/AssetRipper/releases/download/2.0.0/AssetRipper_mac_arm64.tar.xz"
           mkdir -p ar && tar xf ar.tar.xz -C ar
-          find ar -type f -name "*AssetRipper*" | head
+          find ar -type f | head -20
 
-      - name: 运行 AssetRipper 导出 Unity 工程
+      - name: 启动 headless 服务
         run: |
           cd ar
-          EXE=$(find . -type f -perm +111 | grep -i ripper | head -1)
-          echo "executable: $EXE"
-          # AssetRipper 2.0 CLI: 先看帮助确认参数
+          EXE=$(find . -type f -perm +111 | grep -i "AssetRipper.GUI" | head -1)
           chmod +x "$EXE"
-          "$EXE" --help 2>&1 | head -40 || true
+          nohup "$EXE" --headless --port 8080 --log false > server.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/ | grep -q 200 && echo "server up" && break
+            sleep 2
+          done
+          curl -s http://127.0.0.1:8080/ | head -5
 
-      - name: 导出 ExportedProject
+      - name: 加载 4.1 数据
         run: |
-          cd ar
-          EXE=$(find . -type f -perm +111 | grep -i ripper | head -1)
-          # CLI 导出（参数以 --help 输出为准，2.0 支持 -i 输入 -o 输出）
-          "$EXE" -i "$GITHUB_WORKSPACE/game41" -o "$GITHUB_WORKSPACE/ExportedProject" || \
-          "$EXE" --input "$GITHUB_WORKSPACE/game41" --output "$GITHUB_WORKSPACE/ExportedProject" || true
-          du -sh "$GITHUB_WORKSPACE/ExportedProject" 2>/dev/null || echo "export failed"
+          curl -s -L --max-time 3600 -X POST \
+            -d "Path=$GITHUB_WORKSPACE/game41" \
+            http://127.0.0.1:8080/LoadFolder -o load_result.html -w "http:%{http_code} time:%{time_total}s\n"
+          grep -io "error\|failed" load_result.html | head -3 || echo "load ok"
+
+      - name: 导出 Unity 工程
+        run: |
+          curl -s -L --max-time 3600 -X POST \
+            -d "Path=$GITHUB_WORKSPACE/ExportedProject" \
+            http://127.0.0.1:8080/Export/UnityProject -o export_result.html -w "http:%{http_code} time:%{time_total}s\n"
+          du -sh ExportedProject 2>/dev/null || echo "export failed"
+          find ExportedProject -maxdepth 2 -type d 2>/dev/null | head -20
 
       - name: 上传 ExportedProject
         uses: actions/upload-artifact@v4
@@ -45,3 +54,14 @@ jobs:
           name: exported-project-41
           path: ExportedProject
           retention-days: 7
+
+      - name: 上传日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ripper-logs
+          path: |
+            ar/server.log
+            load_result.html
+            export_result.html
+          if-no-files-found: ignore
