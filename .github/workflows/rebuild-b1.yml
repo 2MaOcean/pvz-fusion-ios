@@ -26,20 +26,20 @@ jobs:
         run: |
           sudo installer -pkg unity.pkg -target /
           sudo installer -pkg ios.pkg -target /
-          UNI=/Applications/Unity/Hub/Editor/2021.3.9f1/Unity.app/Contents/MacOS/Unity
-          ls -la "$UNI" && "$UNI" -version
+          UNI=$(find /Applications -maxdepth 5 -path "*Unity.app/Contents/MacOS/Unity" 2>/dev/null | head -1)
+          echo "Unity at: $UNI"
+          [ -n "$UNI" ] && "$UNI" -version
+          echo "UNITY_EXE=$UNI" >> $GITHUB_ENV
 
       - name: 生成手动激活申请文件 (.alf)
         run: |
-          UNI=/Applications/Unity/Hub/Editor/2021.3.9f1/Unity.app/Contents/MacOS/Unity
+          UNI="$UNITY_EXE"
           cd "$HOME"
           "$UNI" -batchmode -nographics -quit -createManualActivationFile -logFile alf.log || true
-          cat alf.log | tail -5 || true
-          ALF=$(find "$HOME" -name "*.alf" 2>/dev/null | head -1)
-          find . -maxdepth 1 -name "Unity_v*.alf"
-          if [ -z "$ALF" ]; then ALF=$(find . -maxdepth 1 -name "Unity_v*.alf" | head -1); fi
+          tail -5 alf.log || true
+          ALF=$(find "$HOME" "$GITHUB_WORKSPACE" -name "Unity_v*.alf" 2>/dev/null | head -1)
           echo "ALF=$ALF" >> $GITHUB_ENV
-          [ -n "$ALF" ] && head -3 "$ALF"
+          [ -n "$ALF" ] && head -3 "$ALF" && echo "alf ready" || echo "ALF NOT FOUND"
 
       - name: 上传 .alf
         uses: actions/upload-artifact@v4
