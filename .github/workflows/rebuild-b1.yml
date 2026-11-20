@@ -1,0 +1,45 @@
+name: Rebuild 4.1 — Stage B1 (安装 Unity + 生成激活申请)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup-unity:
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - name: 下载 Unity 2021.3.9f1 编辑器 + iOS 模块
+        run: |
+          curl -sL --retry 10 --retry-all-errors -o unity.pkg \
+            "https://download.unity3d.com/download_unity/ad3870b89536/MacEditorInstaller/Unity-2021.3.9f1.pkg"
+          curl -sL --retry 10 --retry-all-errors -o ios.pkg \
+            "https://download.unity3d.com/download_unity/ad3870b89536/MacEditorInstaller/UnitySetup-iOS-Support-for-Editor-2021.3.9f1.pkg"
+          ls -la unity.pkg ios.pkg
+
+      - name: 安装
+        run: |
+          sudo installer -pkg unity.pkg -target /
+          sudo installer -pkg ios.pkg -target /
+          UNI=/Applications/Unity/Hub/Editor/2021.3.9f1/Unity.app/Contents/MacOS/Unity
+          ls -la "$UNI" && "$UNI" -version
+
+      - name: 生成手动激活申请文件 (.alf)
+        run: |
+          UNI=/Applications/Unity/Hub/Editor/2021.3.9f1/Unity.app/Contents/MacOS/Unity
+          cd "$HOME"
+          "$UNI" -batchmode -nographics -quit -createManualActivationFile -logFile alf.log || true
+          cat alf.log | tail -5 || true
+          ALF=$(find "$HOME" -name "*.alf" 2>/dev/null | head -1)
+          find . -maxdepth 1 -name "Unity_v*.alf"
+          if [ -z "$ALF" ]; then ALF=$(find . -maxdepth 1 -name "Unity_v*.alf" | head -1); fi
+          echo "ALF=$ALF" >> $GITHUB_ENV
+          [ -n "$ALF" ] && head -3 "$ALF"
+
+      - name: 上传 .alf
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-activation-file
+          path: |
+            ${{ env.ALF }}
+            alf.log
+          if-no-files-found: warn
