@@ -1,0 +1,108 @@
+name: Rebuild 4.1 — Stage B2 (Unity 激活 + iOS 构建)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    timeout-minutes: 360
+    steps:
+      - name: 下载并安装 Unity 2021.3.9f1 + iOS 模块
+        run: |
+          fetch() { for i in $(seq 1 15); do curl -sL --max-time 600 -C - -o "$1" "$2" && S=$(stat -f%z "$1") && [ "$S" -gt "$3" ] && return 0; sleep 3; done; return 1; }
+          fetch unity.pkg "https://download.unity3d.com/download_unity/ad3870b89536/MacEditorInstaller/Unity-2021.3.9f1.pkg" 2900000000
+          fetch ios.pkg "https://download.unity3d.com/download_unity/ad3870b89536/MacEditorTargetInstaller/UnitySetup-iOS-Support-for-Editor-2021.3.9f1.pkg" 600000000 || \
+          fetch ios.pkg "https://download.unitychina.cn/download_unity/ad3870b89536/MacEditorTargetInstaller/UnitySetup-iOS-Support-for-Editor-2021.3.9f1.pkg" 600000000
+          sudo installer -pkg unity.pkg -target /
+          sudo installer -pkg ios.pkg -target /
+          UNI=$(find /Applications -maxdepth 5 -path "*Unity.app/Contents/MacOS/Unity" | head -1)
+          echo "UNITY_EXE=$UNI" >> $GITHUB_ENV
+          "$UNI" -version
+
+      - name: Unity Personal 命令行激活
+        run: |
+          "$UNITY_EXE" -batchmode -nographics -quit \
+            -username "${{ secrets.UNITY_EMAIL }}" \
+            -password "${{ secrets.UNITY_PASSWORD }}" \
+            -logFile activation.log || true
+          echo "--- 激活日志关键行 ---"
+          grep -iE "licen|success|fail|error" activation.log | grep -viE "password" | head -15 || true
+          ls -la "$HOME/.local/share/Unity3d/Unity" 2>/dev/null || true
+
+      - name: 下载 ExportedProject
+        run: |
+          curl -sL -o ep.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
+          tar xzf ep.tar.gz
+          ls ExportedProject/ExportedProject/Assets | head
+
+      - name: 注入 CI 构建脚本
+        run: |
+          mkdir -p ExportedProject/ExportedProject/Assets/Editor
+          cat > ExportedProject/ExportedProject/Assets/Editor/CIOSBuild.cs <<'CS'
+          using UnityEditor;
+          using UnityEngine;
+          using System.Linq;
+          public static class CIOSBuild {
+              public static void Build() {
+                  var scenes = EditorBuildSettings.scenes.Where(s => s.enabled).Select(s => s.path).ToArray();
+                  Debug.Log("CI: building scenes=" + string.Join(",", scenes));
+                  var opt = new BuildPlayerOptions {
+                      scenes = scenes.Length > 0 ? scenes : new[]{"Assets/Scenes/SampleScene.unity"},
+                      locationPathName = "iosbuild",
+                      target = BuildTarget.iOS,
+                      options = BuildOptions.None
+                  };
+                  var report = BuildPipeline.BuildPlayer(opt);
+                  Debug.Log("CI: result=" + report.summary.result + " size=" + report.summary.totalSize);
+                  if (report.summary.result != BuildResult.Succeeded) EditorApplication.Exit(2);
+              }
+          }
+          CS
+          echo "script injected"
+
+      - name: Unity 编译 + 构建 iOS（Xcode 工程）
+        run: |
+          cd ExportedProject/ExportedProject
+          "$UNITY_EXE" -batchmode -nographics \
+            -projectPath "$PWD" \
+            -buildTarget iOS \
+            -executeMethod CIOSBuild.Build \
+            -logFile unity_build.log || true
+          echo "--- 构建日志关键行 ---"
+          grep -iE "error CS|Build succeeded|Build Finished|result=|Aborting" unity_build.log | head -30 || true
+          echo "--- iosbuild 产物 ---"
+          ls -la iosbuild 2>/dev/null | head -10 || echo "no iosbuild"
+
+      - name: xcodebuild 编译 ipa
+        run: |
+          cd ExportedProject/ExportedProject
+          [ -d iosbuild/Unity-iPhone.xcodeproj ] || { echo "no xcodeproj, build failed earlier"; exit 0; }
+          cd iosbuild
+          xcodebuild -project Unity-iPhone.xcodeproj -scheme Unity-iPhone \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" -derivedDataPath dd build 2>&1 | tail -30
+          APP=$(find dd/Build/Products -name "*.app" | head -1)
+          echo "APP=$APP"
+          if [ -n "$APP" ]; then
+            mkdir -p Payload && cp -R "$APP" Payload/
+            zip -qr /tmp/PvzFusion-4.1-unsigned.ipa Payload
+            curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/${{ github.repository }}/releases \
+              -d '{"tag_name":"rebuild-41-ios","name":"PvZ Fusion 4.1 iOS（未签名，TrollStore 用）"}' > /dev/null
+            REL=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/${{ github.repository }}/releases/tags/rebuild-41-ios | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
+            curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @/tmp/PvzFusion-4.1-unsigned.ipa \
+              "https://uploads.github.com/repos/${{ github.repository }}/releases/$REL/assets?name=PvzFusion-4.1-unsigned.ipa" | python3 -c "import json,sys;d=json.load(sys.stdin);print('RELEASED:', d.get('name'), d.get('size'), d.get('message',''))"
+          fi
+
+      - name: 上传日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-build-logs
+          path: |
+            activation.log
+            ExportedProject/ExportedProject/unity_build.log
+          if-no-files-found: ignore
