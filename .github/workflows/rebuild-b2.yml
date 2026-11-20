@@ -8,10 +8,10 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 360
     steps:
-      - name: 下载并安装 Unity 2021.3.9f1 + iOS 模块
+      - name: 下载并安装 Unity 2021.3.9f1 (ARM64) + iOS 模块
         run: |
           fetch() { for i in $(seq 1 15); do curl -sL --max-time 600 -C - -o "$1" "$2" && S=$(stat -f%z "$1") && [ "$S" -gt "$3" ] && return 0; sleep 3; done; return 1; }
-          fetch unity.pkg "https://download.unity3d.com/download_unity/ad3870b89536/MacEditorInstaller/Unity-2021.3.9f1.pkg" 2900000000
+          fetch unity.pkg "https://download.unity3d.com/download_unity/ad3870b89536/MacEditorInstallerArm64/Unity-2021.3.9f1.pkg" 2500000000
           fetch ios.pkg "https://download.unity3d.com/download_unity/ad3870b89536/MacEditorTargetInstaller/UnitySetup-iOS-Support-for-Editor-2021.3.9f1.pkg" 600000000 || \
           fetch ios.pkg "https://download.unitychina.cn/download_unity/ad3870b89536/MacEditorTargetInstaller/UnitySetup-iOS-Support-for-Editor-2021.3.9f1.pkg" 600000000
           sudo installer -pkg unity.pkg -target /
@@ -61,17 +61,31 @@ jobs:
           CS
           echo "script injected"
 
-      - name: Unity 编译 + 构建 iOS（Xcode 工程）
+      - name: Unity 编译 + 构建 iOS（Xcode 工程，带重试）
         run: |
           cd ExportedProject/ExportedProject
-          "$UNITY_EXE" -batchmode -nographics \
-            -projectPath "$PWD" \
-            -buildTarget iOS \
-            -executeMethod CIOSBuild.Build \
-            -logFile unity_build.log || true
-          echo "--- 构建日志关键行 ---"
-          grep -iE "error CS|Build succeeded|Build Finished|result=|Aborting" unity_build.log | head -30 || true
-          echo "--- iosbuild 产物 ---"
+          for ATTEMPT in 1 2 3; do
+            echo "===== 构建尝试 $ATTEMPT ====="
+            # 构建前预热 Unity CDN（失败时重激活兜底）
+            curl -s -o /dev/null -w "cdn-warmup: %{http_code}\n" --max-time 20 "https://public-cdn.cloud.unity3d.com/config/production" || true
+            if [ "$ATTEMPT" -gt 1 ]; then
+              "$UNITY_EXE" -batchmode -nographics -quit \
+                -username "${{ secrets.UNITY_EMAIL }}" \
+                -password "${{ secrets.UNITY_PASSWORD }}" \
+                -logFile reactivation.log || true
+            fi
+            "$UNITY_EXE" -batchmode -nographics \
+              -projectPath "$PWD" \
+              -buildTarget iOS \
+              -executeMethod CIOSBuild.Build \
+              -logFile unity_build.log && echo "BUILD_COMMAND_OK" || echo "BUILD_COMMAND_FAILED"
+            [ -d iosbuild/Unity-iPhone.xcodeproj ] && echo "XCODEPROJ_READY" && break
+            # 失败：输出错误摘要供诊断
+            echo "--- 尝试 $ATTEMPT 失败，错误摘要 ---"
+            grep -iE "error CS|Aborting|Failed to activate|timed out" unity_build.log | head -20 || true
+            tail -5 unity_build.log
+          done
+          echo "--- 最终产物 ---"
           ls -la iosbuild 2>/dev/null | head -10 || echo "no iosbuild"
 
       - name: xcodebuild 编译 ipa
