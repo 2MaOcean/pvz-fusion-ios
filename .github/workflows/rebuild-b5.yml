@@ -33,19 +33,6 @@ jobs:
           echo "UNITY_EMAIL=${{ secrets.UNITY_EMAIL }}" >> $GITHUB_ENV
           echo "UNITY_PASSWORD=${{ secrets.UNITY_PASSWORD }}" >> $GITHUB_ENV
 
-      - name: license 诊断（unity-cli context + 最小 Unity 启动）
-        run: |
-          echo "=== unity-cli license-context ==="
-          unity-cli license-context 2>&1 | head -20 || true
-          echo "=== Unity 最小启动（无 projectPath，观察 license 检查）==="
-          "$UNITY_EXE" -batchmode -nographics -quit -logFile mini.log || true
-          echo "exit=$?"
-          grep -iE "licen|error|timed out" mini.log | grep -viE "password" | head -10 || echo "(无 license 错误)"
-          echo "=== force-free 最小启动 ==="
-          "$UNITY_EXE" -batchmode -nographics -quit -force-free -logFile free.log || true
-          echo "exit=$?"
-          grep -iE "licen|error|timed out" free.log | grep -viE "password" | head -10 || echo "(无 license 错误)"
-
       - name: 下载 ExportedProject（下载后静置稳网）
         run: |
           curl -sL -o ep.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
