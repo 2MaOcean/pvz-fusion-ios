@@ -11,7 +11,7 @@ text = open(log, encoding='utf-8', errors='ignore').read()
 # 收集全部错误
 errs = []  # (file, line, code, message)
 for m in re.finditer(r'(Assets/[^\s"]+\.cs)\((\d+),(\d+)\): (error CS\d+): (.+)', text):
-    errs.append((m.group(1), int(m.group(2)), m.group(4), m.group(5)))
+    errs.append((m.group(1), int(m.group(2)), m.group(4).replace('error ', ''), m.group(5)))
 
 by_code = {}
 for f, ln, code, msg in errs:
