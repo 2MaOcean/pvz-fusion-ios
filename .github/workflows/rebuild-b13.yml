@@ -42,6 +42,12 @@ jobs:
             -e "${{ secrets.UNITY_EMAIL }}" \
             -p "${{ secrets.UNITY_PASSWORD }}" 2>&1 | grep -vi password | head -10 || true
 
+      - name: 设置 Unity 路径
+        run: |
+          UNI=$(find /Applications -maxdepth 5 -path "*Unity.app/Contents/MacOS/Unity" | head -1)
+          echo "UNITY_EXE=$UNI" >> $GITHUB_ENV
+          ls -la "$UNI"
+
       - name: 下载 ExportedProject
         run: |
           curl -sL -o ep.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
@@ -94,31 +100,7 @@ jobs:
               SUCCESS=1
               break
             fi
-            # 解析 CS0104 歧义错误 → 自动加 using alias
-            python3 - <<'PY'
-            import re, os
-            log = open('unity_build.log', encoding='utf-8', errors='ignore').read()
-            files = set()
-            for m in re.finditer(r'(Assets/[^\s"]+\.cs)\(\d+,\d+\): error CS0104', log):
-                files.add(m.group(1))
-            print(f"CS0104 文件数: {len(files)}")
-            alias = 'using YieldAwaitable = Cysharp.Threading.Tasks.YieldAwaitable;'
-            fixed = 0
-            for rel in sorted(files):
-                if not os.path.exists(rel): continue
-                s = open(rel, encoding='utf-8', errors='ignore').read()
-                if 'using YieldAwaitable = Cysharp.Threading.Tasks' in s: continue
-                # 插入到首个 using 行之前（文件顶部）
-                lines = s.split('\n')
-                ins = 0
-                for i, l in enumerate(lines[:30]):
-                    if l.strip().startswith('using '):
-                        ins = i; break
-                lines.insert(ins, alias)
-                open(rel, 'w', encoding='utf-8').write('\n'.join(lines))
-                fixed += 1
-            print(f"已修复文件数: {fixed}")
-            PY
+            python3 "$GITHUB_WORKSPACE/tools/fix_cs0104.py" "$LOG" "$PWD"
             # 如果本轮没有任何 CS0104 修复 → 说明错误类型变了，输出清单后停止迭代
             NEWERR=$(grep -c "error CS0104" "$LOG" 2>/dev/null || echo 0)
             OTHER=$(grep -E "error CS" "$LOG" 2>/dev/null | grep -v "CS0104" | head -10)
