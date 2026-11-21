@@ -20,6 +20,20 @@ jobs:
           echo "UNITY_EXE=$UNI" >> $GITHUB_ENV
           "$UNI" -version
 
+      - name: 网络诊断（Unity 失败根因）
+        run: |
+          echo "=== 网络服务清单 ==="
+          networksetup -listallnetworkservices
+          echo "=== public-cdn 解析 ==="
+          dscacheutil -q host -a name public-cdn.cloud.unity3d.com || true
+          echo "=== IPv6 测试 ==="
+          curl -6 -s -o /dev/null -w "v6: %{http_code} %{time_total}s\n" --max-time 10 "https://public-cdn.cloud.unity3d.com/config/production" 2>&1 || echo "v6 FAIL"
+          echo "=== IPv4 测试 ==="
+          curl -4 -s -o /dev/null -w "v4: %{http_code} %{time_total}s\n" --max-time 10 "https://public-cdn.cloud.unity3d.com/config/production" 2>&1 || echo "v4 FAIL"
+          echo "=== LicensingClient 选项 ==="
+          LC=$(find /Applications/Unity -name "Unity.Licensing.Client" | head -1)
+          [ -n "$LC" ] && "$LC" --help 2>&1 | head -30 || echo "client not found"
+
       - name: 修复 Unity 网络问题（IPv6 超时 → 强制 IPv4）
         run: |
           # Unity 内部 HTTP client 走 IPv6 连 public-cdn 超时（curl IPv4 正常）
