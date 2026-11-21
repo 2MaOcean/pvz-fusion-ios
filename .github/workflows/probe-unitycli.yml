@@ -1,0 +1,29 @@
+name: Probe unity-cli license activation
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: 安装 unity-cli v3（Node 实现）
+        run: |
+          node --version
+          npm install -g @rage-against-the-pixel/unity-cli@3 2>&1 | tail -3
+          unity-cli --version 2>&1 | head -2 || true
+          unity-cli activate-license --help 2>&1 | head -30 || true
+
+      - name: Personal 在线激活测试
+        run: |
+          export UNITY_USERNAME="${{ secrets.UNITY_EMAIL }}"
+          export UNITY_PASSWORD="${{ secrets.UNITY_PASSWORD }}"
+          unity-cli activate-license --license personal 2>&1 | head -40 || true
+          echo "--- ulf/license 文件检查 ---"
+          find "$HOME" -name "*.ulf" 2>/dev/null | head -5
+          find "$HOME/Library/Application Support/Unity" -type f 2>/dev/null | head -10
+
+      - name: Unity 命令行 license 验证（快速）
+        run: |
+          UNI=$(find /Applications -maxdepth 5 -path "*Unity.app/Contents/MacOS/Unity" | head -1)
+          [ -z "$UNI" ] && { echo "unity editor 未装（本探测不含）"; exit 0; }
+          "$UNI" -batchmode -nographics -quit -logFile lic.log || true
+          grep -iE "licen|error" lic.log | grep -viE "password" | head -10 || true
