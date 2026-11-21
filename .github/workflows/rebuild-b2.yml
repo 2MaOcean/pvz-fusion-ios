@@ -20,6 +20,18 @@ jobs:
           echo "UNITY_EXE=$UNI" >> $GITHUB_ENV
           "$UNI" -version
 
+      - name: 修复 Unity 网络问题（IPv6 超时 → 强制 IPv4）
+        run: |
+          # Unity 内部 HTTP client 走 IPv6 连 public-cdn 超时（curl IPv4 正常）
+          # 固定 hosts 到 IPv4 + 关闭接口 IPv6
+          IP4=$(dig +short A public-cdn.cloud.unity3d.com 2>/dev/null | grep -E '^[0-9]+\.' | head -1)
+          echo "resolved IPv4: $IP4"
+          [ -n "$IP4" ] && echo "$IP4 public-cdn.cloud.unity3d.com" | sudo tee -a /etc/hosts
+          for svc in "Ethernet" "Wi-Fi"; do
+            sudo networksetup -setv6off "$svc" 2>/dev/null || true
+          done
+          curl -4 -s -o /dev/null -w "cdn via v4: %{http_code} %{time_total}s\n" --max-time 15 "https://public-cdn.cloud.unity3d.com/config/production" || true
+
       - name: Unity Personal 命令行激活
         run: |
           "$UNITY_EXE" -batchmode -nographics -quit \
