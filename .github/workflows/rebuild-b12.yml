@@ -71,6 +71,7 @@ jobs:
           mkdir -p ExportedProject/ExportedProject/Assets/Editor
           cat > ExportedProject/ExportedProject/Assets/Editor/CIOSBuild.cs <<'CS'
           using UnityEditor;
+          using UnityEditor.Build.Reporting;
           using UnityEngine;
           using System.Linq;
           public static class CIOSBuild {
