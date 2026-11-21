@@ -1,6 +1,0 @@
-name: Test macOS runner
-on: workflow_dispatch
-jobs:
-  m:
-    runs-on: macos-15
-    steps: [{run: "echo macos-ok && xcodebuild -version && sw_vers"}]
