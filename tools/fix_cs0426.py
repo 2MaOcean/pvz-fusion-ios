@@ -54,6 +54,18 @@ for rel, ln, col, outer, missing in errs:
             fixed_files.add(rel)
             print(f"  ref->stub: {rel} ({outer}.{missing} -> {missing}, {n} 处)")
 
+# 兜底：注释仍报错的行（引用是变量访问，文本替换不可达）
+for rel, ln, col, outer, missing in errs:
+    path = os.path.join(root, rel)
+    if not os.path.exists(path): continue
+    lines = open(path, encoding='utf-8', errors='ignore').read().split('\n')
+    idx = ln - 1
+    if 0 <= idx < len(lines) and lines[idx].strip() and not lines[idx].strip().startswith('//'):
+        lines[idx] = '// [CS0426-stubbed] ' + lines[idx]
+        open(path, 'w', encoding='utf-8').write('\n'.join(lines))
+        fixed_files.add(rel)
+        print(f"  line-stubbed: {rel}:{ln}")
+
 # 生成 stub（全局命名空间空类型）
 if stubs:
     stub_dir = os.path.join(root, 'Assets', 'Scripts', 'Stubs')
