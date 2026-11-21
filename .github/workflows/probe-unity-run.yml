@@ -1,0 +1,44 @@
+name: Probe Unity batchmode startup
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: 恢复 Unity
+        id: unity
+        uses: actions/cache@v4
+        with:
+          path: /Applications/Unity
+          key: unity-2021.3.9f1-arm64-ios
+      - name: 安装 Hub + license（cache miss 时重做激活）
+        if: steps.unity.outputs.cache-hit != 'true'
+        run: echo "(本次 cache 命中，跳过安装与激活)"
+      - name: Hub 就位检查
+        run: |
+          ls "/Applications/Unity Hub.app/Contents/MacOS/" 2>/dev/null || { brew install --cask unity-hub >/dev/null 2>&1; sudo xattr -dr com.apple.quarantine "/Applications/Unity Hub.app" 2>/dev/null || true; }
+          echo "=== 诊断 1：Unity 直接最小启动 ==="
+          UNI=$(find /Applications -maxdepth 5 -path "*Unity.app/Contents/MacOS/Unity" | head -1)
+          echo "UNITY=[$UNI]"
+          ls -la "$UNI"
+          "$UNI" -batchmode -nographics -quit -logFile "$PWD/u1.log"; echo "exit=$?"
+          echo "--- u1.log ---"
+          cat "$PWD/u1.log" 2>/dev/null | head -25 || echo "(log 不存在)"
+      - name: 诊断 2：带 projectPath 启动（下载最小工程片段）
+        run: |
+          UNI=$(find /Applications -maxdepth 5 -path "*Unity.app/Contents/MacOS/Unity" | head -1)
+          curl -sL -o ep.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
+          tar xzf ep.tar.gz
+          cd ExportedProject/ExportedProject
+          "$UNI" -batchmode -nographics -quit -projectPath "$PWD" -logFile "$PWD/u2.log"; echo "exit=$?"
+          echo "--- u2.log 尾部 ---"
+          tail -30 "$PWD/u2.log" 2>/dev/null || echo "(log 不存在)"
+      - name: 上传日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: startup-logs
+          path: |
+            u1.log
+            ExportedProject/ExportedProject/u2.log
+          if-no-files-found: ignore
