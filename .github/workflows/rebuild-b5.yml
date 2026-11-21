@@ -1,0 +1,143 @@
+name: Rebuild 4.1 — Stage B5 (license 诊断 + force-free 尝试)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    timeout-minutes: 360
+    steps:
+      - name: 恢复或安装 Unity 2021.3.9f1 (ARM64)
+        id: unity
+        uses: actions/cache@v4
+        with:
+          path: /Applications/Unity
+          key: unity-2021.3.9f1-arm64-ios
+      - name: 安装（cache miss 时）
+        if: steps.unity.outputs.cache-hit != 'true'
+        run: |
+          fetch() { for i in $(seq 1 15); do curl -sL --max-time 600 -C - -o "$1" "$2" && S=$(stat -f%z "$1") && [ "$S" -gt "$3" ] && return 0; sleep 3; done; return 1; }
+          fetch unity.pkg "https://download.unity3d.com/download_unity/ad3870b89536/MacEditorInstallerArm64/Unity-2021.3.9f1.pkg" 2500000000
+          fetch ios.pkg "https://download.unity3d.com/download_unity/ad3870b89536/MacEditorTargetInstaller/UnitySetup-iOS-Support-for-Editor-2021.3.9f1.pkg" 600000000 || \
+          fetch ios.pkg "https://download.unitychina.cn/download_unity/ad3870b89536/MacEditorTargetInstaller/UnitySetup-iOS-Support-for-Editor-2021.3.9f1.pkg" 600000000
+          sudo installer -pkg unity.pkg -target /
+          sudo installer -pkg ios.pkg -target /
+          UNI=$(find /Applications -maxdepth 5 -path "*Unity.app/Contents/MacOS/Unity" | head -1)
+          echo "UNITY_EXE=$UNI" >> $GITHUB_ENV
+      - name: 设置 Unity 路径
+        run: |
+          UNI=$(find /Applications -maxdepth 5 -path "*Unity.app/Contents/MacOS/Unity" | head -1)
+          echo "UNITY_EXE=$UNI" >> $GITHUB_ENV
+          npm install -g @rage-against-the-pixel/unity-cli@3 2>&1 | tail -1
+          echo "UNITY_EMAIL=${{ secrets.UNITY_EMAIL }}" >> $GITHUB_ENV
+          echo "UNITY_PASSWORD=${{ secrets.UNITY_PASSWORD }}" >> $GITHUB_ENV
+
+      - name: license 诊断（unity-cli context + 最小 Unity 启动）
+        run: |
+          echo "=== unity-cli license-context ==="
+          unity-cli license-context 2>&1 | head -20 || true
+          echo "=== Unity 最小启动（无 projectPath，观察 license 检查）==="
+          "$UNITY_EXE" -batchmode -nographics -quit -logFile mini.log || true
+          echo "exit=$?"
+          grep -iE "licen|error|timed out" mini.log | grep -viE "password" | head -10 || echo "(无 license 错误)"
+          echo "=== force-free 最小启动 ==="
+          "$UNITY_EXE" -batchmode -nographics -quit -force-free -logFile free.log || true
+          echo "exit=$?"
+          grep -iE "licen|error|timed out" free.log | grep -viE "password" | head -10 || echo "(无 license 错误)"
+
+      - name: 下载 ExportedProject
+        run: |
+          curl -sL -o ep.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
+          tar xzf ep.tar.gz
+          ls ExportedProject/ExportedProject/Assets | head
+
+      - name: 注入 CI 构建脚本
+        run: |
+          mkdir -p ExportedProject/ExportedProject/Assets/Editor
+          cat > ExportedProject/ExportedProject/Assets/Editor/CIOSBuild.cs <<'CS'
+          using UnityEditor;
+          using UnityEngine;
+          using System.Linq;
+          public static class CIOSBuild {
+              public static void Build() {
+                  var scenes = EditorBuildSettings.scenes.Where(s => s.enabled).Select(s => s.path).ToArray();
+                  Debug.Log("CI: building scenes=" + string.Join(",", scenes));
+                  var opt = new BuildPlayerOptions {
+                      scenes = scenes.Length > 0 ? scenes : new[]{"Assets/Scenes/SampleScene.unity"},
+                      locationPathName = "iosbuild",
+                      target = BuildTarget.iOS,
+                      options = BuildOptions.None
+                  };
+                  var report = BuildPipeline.BuildPlayer(opt);
+                  Debug.Log("CI: result=" + report.summary.result + " size=" + report.summary.totalSize);
+                  if (report.summary.result != BuildResult.Succeeded) EditorApplication.Exit(2);
+              }
+          }
+          CS
+          echo "script injected"
+
+      - name: Unity 构建（先激活后 force-free 双保险，带重试）
+        run: |
+          cd ExportedProject/ExportedProject
+          for ATTEMPT in 1 2; do
+            echo "===== 构建尝试 $ATTEMPT ====="
+            if [ "$ATTEMPT" -eq 1 ]; then
+              unity-cli activate-license -l personal \
+                -e "${{ secrets.UNITY_EMAIL }}" \
+                -p "${{ secrets.UNITY_PASSWORD }}" 2>&1 | grep -vi password | head -10 || true
+              "$UNITY_EXE" -batchmode -nographics \
+                -projectPath "$PWD" \
+                -buildTarget iOS \
+                -executeMethod CIOSBuild.Build \
+                -logFile unity_build.log && echo "BUILD_COMMAND_OK" || echo "BUILD_COMMAND_FAILED"
+            else
+              echo "--- 尝试 force-free ---"
+              "$UNITY_EXE" -batchmode -nographics -force-free \
+                -projectPath "$PWD" \
+                -buildTarget iOS \
+                -executeMethod CIOSBuild.Build \
+                -logFile unity_build_free.log && echo "BUILD_COMMAND_OK" || echo "BUILD_COMMAND_FAILED"
+              [ -f unity_build.log ] || cp unity_build_free.log unity_build.log 2>/dev/null || true
+            fi
+            [ -d iosbuild/Unity-iPhone.xcodeproj ] && echo "XCODEPROJ_READY" && break
+            echo "--- 尝试 $ATTEMPT 失败，错误摘要 ---"
+            tail -12 unity_build.log 2>/dev/null || true
+          done
+          echo "--- 最终产物 ---"
+          ls -la iosbuild 2>/dev/null | head -10 || echo "no iosbuild"
+
+      - name: xcodebuild 编译 ipa
+        run: |
+          cd ExportedProject/ExportedProject
+          [ -d iosbuild/Unity-iPhone.xcodeproj ] || { echo "no xcodeproj, build failed earlier"; exit 0; }
+          cd iosbuild
+          xcodebuild -project Unity-iPhone.xcodeproj -scheme Unity-iPhone \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" -derivedDataPath dd build 2>&1 | tail -30
+          APP=$(find dd/Build/Products -name "*.app" | head -1)
+          echo "APP=$APP"
+          if [ -n "$APP" ]; then
+            mkdir -p Payload && cp -R "$APP" Payload/
+            zip -qr /tmp/PvzFusion-4.1-unsigned.ipa Payload
+            curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/${{ github.repository }}/releases \
+              -d '{"tag_name":"rebuild-41-ios","name":"PvZ Fusion 4.1 iOS（未签名，TrollStore 用）"}' > /dev/null
+            REL=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/${{ github.repository }}/releases/tags/rebuild-41-ios | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
+            curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @/tmp/PvzFusion-4.1-unsigned.ipa \
+              "https://uploads.github.com/repos/${{ github.repository }}/releases/$REL/assets?name=PvzFusion-4.1-unsigned.ipa" | python3 -c "import json,sys;d=json.load(sys.stdin);print('RELEASED:', d.get('name'), d.get('size'), d.get('message',''))"
+          fi
+
+      - name: 上传日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-diag-logs
+          path: |
+            mini.log
+            free.log
+            ExportedProject/ExportedProject/unity_build.log
+            ExportedProject/ExportedProject/unity_build_free.log
+          if-no-files-found: ignore
