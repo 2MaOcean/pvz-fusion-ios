@@ -46,11 +46,19 @@ jobs:
           echo "exit=$?"
           grep -iE "licen|error|timed out" free.log | grep -viE "password" | head -10 || echo "(无 license 错误)"
 
-      - name: 下载 ExportedProject
+      - name: 下载 ExportedProject（下载后静置稳网）
         run: |
           curl -sL -o ep.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
           tar xzf ep.tar.gz
           ls ExportedProject/ExportedProject/Assets | head
+          echo "大文件下载后静置 45s 等网络稳定..."
+          sleep 45
+          for i in 1 2 3; do
+            C=$(curl -4 -s -o /dev/null -w "%{http_code}" --max-time 15 "https://public-cdn.cloud.unity3d.com/config/production")
+            echo "net check $i: $C"
+            [ "$C" = "200" ] && break
+            sleep 30
+          done
 
       - name: 注入 CI 构建脚本
         run: |
@@ -77,32 +85,30 @@ jobs:
           CS
           echo "script injected"
 
-      - name: Unity 构建（先激活后 force-free 双保险，带重试）
+      - name: Unity 构建（网络探测 + 指数退避重试）
         run: |
           cd ExportedProject/ExportedProject
-          for ATTEMPT in 1 2; do
+          NETCHECK() {
+            C=$(curl -4 -s -o /dev/null -w "%{http_code}" --max-time 15 "https://public-cdn.cloud.unity3d.com/config/production")
+            echo "net: $C"; [ "$C" = "200" ] && return 0 || return 1
+          }
+          for ATTEMPT in 1 2 3 4 5; do
             echo "===== 构建尝试 $ATTEMPT ====="
-            if [ "$ATTEMPT" -eq 1 ]; then
-              unity-cli activate-license -l personal \
-                -e "${{ secrets.UNITY_EMAIL }}" \
-                -p "${{ secrets.UNITY_PASSWORD }}" 2>&1 | grep -vi password | head -10 || true
-              "$UNITY_EXE" -batchmode -nographics \
-                -projectPath "$PWD" \
-                -buildTarget iOS \
-                -executeMethod CIOSBuild.Build \
-                -logFile unity_build.log && echo "BUILD_COMMAND_OK" || echo "BUILD_COMMAND_FAILED"
-            else
-              echo "--- 尝试 force-free ---"
-              "$UNITY_EXE" -batchmode -nographics -force-free \
-                -projectPath "$PWD" \
-                -buildTarget iOS \
-                -executeMethod CIOSBuild.Build \
-                -logFile unity_build_free.log && echo "BUILD_COMMAND_OK" || echo "BUILD_COMMAND_FAILED"
-              [ -f unity_build.log ] || cp unity_build_free.log unity_build.log 2>/dev/null || true
-            fi
+            NETCHECK || { echo "网络抖动，等待 $((ATTEMPT*45))s 后重试"; sleep $((ATTEMPT*45)); }
+            unity-cli activate-license -l personal \
+              -e "${{ secrets.UNITY_EMAIL }}" \
+              -p "${{ secrets.UNITY_PASSWORD }}" 2>&1 | grep -vi password | head -8 || true
+            "$UNITY_EXE" -batchmode -nographics \
+              -projectPath "$PWD" \
+              -buildTarget iOS \
+              -executeMethod CIOSBuild.Build \
+              -logFile unity_build.log && echo "BUILD_COMMAND_OK" || echo "BUILD_COMMAND_FAILED"
             [ -d iosbuild/Unity-iPhone.xcodeproj ] && echo "XCODEPROJ_READY" && break
             echo "--- 尝试 $ATTEMPT 失败，错误摘要 ---"
-            tail -12 unity_build.log 2>/dev/null || true
+            grep -iE "error CS|Aborting" unity_build.log 2>/dev/null | head -15 || true
+            tail -6 unity_build.log 2>/dev/null || true
+            NETCHECK || echo "（失败后网络探测：public-cdn 也超时 → 实锤网络抖动）"
+            sleep $((ATTEMPT * 40))
           done
           echo "--- 最终产物 ---"
           ls -la iosbuild 2>/dev/null | head -10 || echo "no iosbuild"
