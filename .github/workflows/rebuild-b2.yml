@@ -101,6 +101,8 @@ jobs:
                 -logFile reactivation.log || true
             fi
             "$UNITY_EXE" -batchmode -nographics \
+              -username "${{ secrets.UNITY_EMAIL }}" \
+              -password "${{ secrets.UNITY_PASSWORD }}" \
               -projectPath "$PWD" \
               -buildTarget iOS \
               -executeMethod CIOSBuild.Build \
