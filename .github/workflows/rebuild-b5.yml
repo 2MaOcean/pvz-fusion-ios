@@ -85,11 +85,11 @@ jobs:
             unity-cli activate-license -l personal \
               -e "${{ secrets.UNITY_EMAIL }}" \
               -p "${{ secrets.UNITY_PASSWORD }}" 2>&1 | grep -vi password | head -8 || true
-            "$UNITY_EXE" -batchmode -nographics \
+            perl -e 'alarm 1800; exec @ARGV' "$UNITY_EXE" -batchmode -nographics \
               -projectPath "$PWD" \
               -buildTarget iOS \
               -executeMethod CIOSBuild.Build \
-              -logFile unity_build.log && echo "BUILD_COMMAND_OK" || echo "BUILD_COMMAND_FAILED"
+              -logFile unity_build.log && echo "BUILD_COMMAND_OK" || echo "BUILD_COMMAND_FAILED(timeout or error)"
             [ -d iosbuild/Unity-iPhone.xcodeproj ] && echo "XCODEPROJ_READY" && break
             echo "--- 尝试 $ATTEMPT 失败，错误摘要 ---"
             grep -iE "error CS|Aborting" unity_build.log 2>/dev/null | head -15 || true
@@ -105,7 +105,7 @@ jobs:
           cd ExportedProject/ExportedProject
           [ -d iosbuild/Unity-iPhone.xcodeproj ] || { echo "no xcodeproj, build failed earlier"; exit 0; }
           cd iosbuild
-          xcodebuild -project Unity-iPhone.xcodeproj -scheme Unity-iPhone \
+          perl -e 'alarm 2700; exec @ARGV' xcodebuild -project Unity-iPhone.xcodeproj -scheme Unity-iPhone \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" -derivedDataPath dd build 2>&1 | tail -30
           APP=$(find dd/Build/Products -name "*.app" | head -1)
