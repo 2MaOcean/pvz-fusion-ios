@@ -1,0 +1,30 @@
+name: Probe unity-cli v3 commands + official CLI
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: unity-cli v3 完整命令清单
+        run: |
+          npm install -g @rage-against-the-pixel/unity-cli@3 2>&1 | tail -1
+          echo "=== unity-cli 顶层命令 ==="
+          unity-cli --help < /dev/null 2>&1 | sed -n '5,60p' || true
+          echo "=== editor 子命令 ==="
+          unity-cli editor --help < /dev/null 2>&1 | head -30 || true
+
+      - name: 安装官方 Unity CLI
+        run: |
+          curl -fsSL https://unity.com/install.sh | bash 2>&1 | tail -5 || true
+          export PATH="$HOME/.local/bin:$PATH"
+          unity --version 2>&1 | head -2 || true
+
+      - name: 官方 CLI auth/license 命令
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "=== license help ==="
+          unity license --help 2>&1 | head -40 || true
+          echo "=== license activate help ==="
+          unity license activate --help 2>&1 | head -60 || true
+          echo "=== auth login help ==="
+          unity auth login --help 2>&1 | head -40 || true
