@@ -44,7 +44,15 @@ for rel, ln, col, outer, missing in errs:
             fixed_files.add(rel)
             print(f"  ref-fixed: {rel} ({outer}.{missing} -> {missing}, {n} 处)")
     else:
+        # 无定义：生成全局 stub + 把引用 "Outer.Missing" 改为 "Missing"
         stubs.add(missing)
+        s = open(path, encoding='utf-8', errors='ignore').read()
+        pat = re.compile(r'\b' + re.escape(outer) + r'\.' + re.escape(missing) + r'\b')
+        s2, n = pat.subn(missing, s)
+        if n:
+            open(path, 'w', encoding='utf-8').write(s2)
+            fixed_files.add(rel)
+            print(f"  ref->stub: {rel} ({outer}.{missing} -> {missing}, {n} 处)")
 
 # 生成 stub（全局命名空间空类型）
 if stubs:
