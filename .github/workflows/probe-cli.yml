@@ -1,0 +1,14 @@
+name: Probe Hub CLI
+on: workflow_dispatch
+jobs:
+  p:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Hub 命令探测
+        run: |
+          brew install --cask unity-hub >/dev/null 2>&1 || true
+          HUB="/Applications/Unity Hub.app/Contents/MacOS/Unity Hub"
+          echo "=== help ==="; "$HUB" -- --headless help 2>&1 | head -40 || true
+          echo "=== no-headless help ==="; "$HUB" -- help 2>&1 | head -30 || true
+          echo "=== version ==="; "$HUB" -- --version 2>&1 | head -5 || true
