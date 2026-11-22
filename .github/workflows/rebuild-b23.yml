@@ -184,12 +184,13 @@ jobs:
           done
           cp -R /tmp/unitask-repo/src/UniTask/Assets/Plugins/UniTask/Runtime/* "$A/unitask/"
           find "$A/unitask" -name "*.asmdef" -delete
-          # SimpleFileBrowser（正确 repo 名：UnitySimpleFileBrowser）
+          # SimpleFileBrowser（正确路径：Plugins/SimpleFileBrowser 含全套 Prefabs/Resources）
           for TRY in 1 2 3; do
             git clone --depth 1 https://github.com/yasirkula/UnitySimpleFileBrowser /tmp/sfb-repo 2>&1 | tail -1 && break
             rm -rf /tmp/sfb-repo; sleep 10
           done
-          cp -R /tmp/sfb-repo/Assets/SimpleFileBrowser/Runtime/* "$A/sfb/"
+          ls /tmp/sfb-repo/Plugins/SimpleFileBrowser/ | head -5
+          cp -R /tmp/sfb-repo/Plugins/SimpleFileBrowser/* "$A/sfb/"
           find "$A/sfb" -name "*.asmdef" -delete
           # 自写 asmdef（name 与 Plugins DLL 同名）
           cat > "$A/spine/spine-csharp/spine-csharp.asmdef" <<'EOF'
