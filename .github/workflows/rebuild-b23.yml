@@ -1,0 +1,352 @@
+name: Rebuild 4.1 — Stage B23 (Unity 2022.3.62 版本匹配 + 两遍法真实化)
+
+on:
+  workflow_dispatch:
+
+env:
+  UNITY_VERSION: 2022.3.62f1
+  UNITY_CHANGESET: 4af31df58517
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    timeout-minutes: 360
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 恢复 Unity 2022.3.62 缓存
+        id: unity
+        uses: actions/cache@v4
+        with:
+          path: /Applications/Unity
+          key: unity-2022.3.62f1-arm64-ios
+
+      - name: 安装 Unity 2022.3.62f1 ARM64 + iOS 支持
+        if: steps.unity.outputs.cache-hit != 'true'
+        run: |
+          set -x
+          BASE="https://download.unity3d.com/download_unity/${UNITY_CHANGESET}"
+          # 编辑器（ARM64）
+          curl -sL -o /tmp/unity-editor.pkg "$BASE/MacEditorInstallerArm64/Unity-${UNITY_VERSION}.pkg"
+          sudo installer -pkg /tmp/unity-editor.pkg -target /
+          # iOS build support（tar.xz 优先，pkg 兜底）
+          curl -sL -o /tmp/ios.tar.xz "$BASE/MacEditorTargetInstaller/UnitySetup-iOS-Support-for-Editor-${UNITY_VERSION}.tar.xz" \
+            && sudo tar xJf /tmp/ios.tar.xz -C "/Applications/Unity/" \
+            || { curl -sL -o /tmp/ios.pkg "$BASE/MacEditorTargetInstaller/UnitySetup-iOS-Support-for-Editor-${UNITY_VERSION}.pkg"; sudo installer -pkg /tmp/ios.pkg -target /; }
+          find /Applications -maxdepth 5 -path "*Unity.app/Contents/MacOS/Unity" | head -2
+
+      - name: 设置 UNITY_EXE
+        run: |
+          UNI=$(find /Applications -maxdepth 5 -path "*Unity.app/Contents/MacOS/Unity" | head -1)
+          [ -n "$UNI" ] || { echo "NO UNITY EXE"; ls /Applications; exit 1; }
+          echo "UNITY_EXE=$UNI" >> $GITHUB_ENV
+          "$UNI" -version
+
+      - name: Hub + license 激活
+        run: |
+          brew install --cask unity-hub >/dev/null 2>&1 || true
+          sudo xattr -dr com.apple.quarantine "/Applications/Unity Hub.app" 2>/dev/null || true
+          sudo mkdir -p "/Library/Application Support/Unity"
+          sudo chown -R "$(whoami)" "/Library/Application Support/Unity"
+          npm install -g @rage-against-the-pixel/unity-cli@3 2>&1 | tail -1
+          for ip in $(dig +short A public-cdn.cloud.unity3d.com | grep -E '^[0-9]+\.'); do
+            echo "block drop out proto tcp to $ip port 443" | sudo tee -a /tmp/pfrules
+          done
+          (echo "set skip on lo0"; cat /tmp/pfrules) | sudo pfctl -f - 2>/dev/null || true
+          sudo pfctl -e 2>/dev/null || true
+          unity-cli activate-license -l personal \
+            -e "${{ secrets.UNITY_EMAIL }}" \
+            -p "${{ secrets.UNITY_PASSWORD }}" 2>&1 | grep -vi password | head -8 || true
+          ls -la "/Library/Application Support/Unity/" 2>/dev/null | head -5
+
+      - name: 下载 ExportedProject + 脚本结构诊断
+        run: |
+          curl -sL -o ep.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
+          tar xzf ep.tar.gz
+          echo "=== Assets/Scripts 顶层目录（判断 Core/spine/UniTask 是否有源码）==="
+          find ExportedProject/ExportedProject/Assets/Scripts -maxdepth 1 -type d | sort
+          echo "=== 抽查 Core.dll 源码是否存在 ==="
+          find ExportedProject/ExportedProject/Assets/Scripts -maxdepth 2 -iname "*core*" | head -5
+          echo "=== 抽查一个方法体（验证是否真实逻辑）==="
+          sed -n '1,40p' ExportedProject/ExportedProject/Assets/Scripts/Assembly-CSharp/AutoChess/AutoChessUI.cs 2>/dev/null | head -40
+
+      - name: Il2CppDumper 生成健康 DummyDll
+        run: |
+          set -x
+          curl -sL -o game41.tar "https://github.com/${{ github.repository }}/releases/download/game41-source/game41.tar"
+          tar xf game41.tar
+          find . -maxdepth 3 -name "GameAssembly.dll" | head -3
+          curl -sL -o ild.zip "https://github.com/Perfare/Il2CppDumper/releases/download/v6.7.46/Il2CppDumper-net7-v6.7.46.zip"
+          mkdir -p /tmp/ild && unzip -o -q ild.zip -d /tmp/ild
+          METADATA=$(find . -path "*il2cpp_data*" -name "global-metadata.dat" | head -1)
+          GA=$(find . -maxdepth 3 -name "GameAssembly.dll" | head -1)
+          echo "GA=$GA META=$METADATA"
+          DOTNET_ROLL_FORWARD=LatestMajor dotnet /tmp/ild/Il2CppDumper.dll "$GA" "$METADATA" /tmp/ildout 2>&1 | tail -5 || true
+          DUMMDIR=$(find /tmp/ildout /tmp/ild "$PWD" -maxdepth 3 -type d -name "DummyDll" 2>/dev/null | head -1)
+          echo "DUMMDIR=$DUMMDIR"
+          ls "$DUMMDIR" | head -10
+          echo "DUMMY_DIR=$DUMMDIR" >> $GITHUB_ENV
+
+      - name: 替换 + 预删 Plugins dummy DLL（保留 .meta GUID）
+        run: |
+          set -x
+          P=ExportedProject/ExportedProject/Assets/Plugins
+          # 1) 用 Il2CppDumper dummy 覆盖 Plugins 同名（保留 meta）
+          for f in "$DUMMY_DIR"/*.dll; do
+            n=$(basename "$f")
+            [ "$n" = "Assembly-CSharp.dll" ] && continue
+            case "$n" in UnityEngine.*) continue;; esac
+            [ -f "$P/$n" ] && cp "$f" "$P/$n" && echo "replaced $n"
+          done
+          # 2) 预删将被真实包/第三方编译替代的 dummy DLL（保留 .meta 供 GUID 复用）
+          KEEP_META_LIST="Unity.RenderPipelines.Core.Runtime Unity.RenderPipelines.Universal.Runtime Unity.2D.Animation.Runtime Unity.2D.Common.Runtime Unity.2D.SpriteShape.Runtime Unity.2D.Tilemap.Extras Unity.TextMeshPro Unity.Collections Unity.Burst Unity.Mathematics Unity.VisualScripting.Core spine-csharp spine-unity UniTask SimpleFileBrowser.Runtime UnityEngine.UI"
+          for n in $KEEP_META_LIST; do
+            rm -f "$P/$n.dll" && echo "pre-deleted $n.dll (meta kept)"
+          done
+          # 3) 彻底删除（不需要 GUID 的）
+          rm -f "$P/__Generated.dll" "$P/__Generated.dll.meta" "$P/System.Runtime.CompilerServices.Unsafe.dll" "$P/System.Runtime.CompilerServices.Unsafe.dll.meta"
+          ls -la "$P" | head -40
+
+      - name: Newtonsoft.Json 真实 DLL 覆盖（NuGet）
+        run: |
+          set -x
+          P=ExportedProject/ExportedProject/Assets/Plugins
+          curl -sL -o nj.nupkg "https://api.nuget.org/v3-flatcontainer/newtonsoft.json/13.0.3/newtonsoft.json.13.0.3.nupkg"
+          unzip -o -q nj.nupkg -d nj
+          NJDLL=$(find nj -path "*netstandard2.0*" -name "Newtonsoft.Json.dll" | head -1)
+          cp "$NJDLL" "$P/Newtonsoft.Json.dll" && echo "Newtonsoft replaced ($NJDLL)"
+          ls -la "$P/Newtonsoft.Json.dll"
+
+      - name: manifest.json 写入官方包（registry 校验版本存在）
+        run: |
+          cd ExportedProject/ExportedProject
+          python3 - <<'PY'
+          import json, subprocess, sys
+          pkgs = {
+            "com.unity.render-pipelines.universal": ["14.0.11", "14.0.9", "14.0.8"],
+            "com.unity.render-pipelines.core":      ["14.0.11", "14.0.9", "14.0.8"],
+            "com.unity.shadergraph":                ["14.0.11", "14.0.9", "14.0.8"],
+            "com.unity.2d.animation":               ["9.0.4", "9.0.2", "9.0.1", "8.0.1"],
+            "com.unity.2d.common":                  ["9.0.2", "9.0.1", "8.0.1"],
+            "com.unity.2d.spriteshape":             ["9.0.2", "9.0.1", "8.0.1"],
+            "com.unity.2d.tilemap.extras":          ["3.1.2", "3.1.1", "3.0.1", "2.2.4"],
+            "com.unity.textmeshpro":                ["3.0.9", "3.0.6"],
+            "com.unity.burst":                      ["1.8.19", "1.8.12", "1.8.4"],
+            "com.unity.collections":                ["2.1.4", "1.5.1"],
+            "com.unity.mathematics":                ["1.2.6", "1.2.1"],
+            "com.unity.visualscripting":            ["1.9.4", "1.8.0", "1.7.8"],
+          }
+          def check(pkg, ver):
+              try:
+                  out = subprocess.run(["curl","-sL","--max-time","30",
+                      f"https://packages.unity.com/{pkg}"], capture_output=True, timeout=40).stdout
+                  data = json.loads(out)
+                  vs = data.get("versions", {})
+                  return ver in vs
+              except Exception as e:
+                  print("check fail", pkg, e); return False
+          mf = json.load(open("Packages/manifest.json"))
+          chosen = {}
+          for pkg, cands in pkgs.items():
+              ok = None
+              for v in cands:
+                  if check(pkg, v): ok = v; break
+              if ok is None:
+                  ok = cands[0]; print("WARN: no verified version for", pkg, "using", ok)
+              chosen[pkg] = ok
+          mf["dependencies"].update(chosen)
+          json.dump(mf, open("Packages/manifest.json","w"), indent=2)
+          print(json.dumps(chosen, indent=1))
+          PY
+          cat Packages/manifest.json | head -30
+
+      - name: 下载第三方库源码 + 自写 asmdef
+        run: |
+          set -x
+          A=ExportedProject/ExportedProject/Assets/ThirdParty
+          mkdir -p "$A/spine" "$A/unitask" "$A/sfb"
+          # spine 4.1（sparse clone，只要 Runtime）
+          git clone --depth 1 --filter=blob:none --sparse --branch 4.1 \
+            https://github.com/EsotericSoftware/spine-runtimes /tmp/spine 2>&1 | tail -1
+          (cd /tmp/spine && git sparse-checkout set spine-unity/Assets/Spine 2>&1 | tail -1)
+          cp -R /tmp/spine/spine-unity/Assets/Spine/Runtime/* "$A/spine/" 2>/dev/null || true
+          find "$A/spine" -name "*.asmdef" -delete
+          # UniTask 2.5.10
+          curl -sL -o /tmp/unitask.tar.gz "https://github.com/Cysharp/UniTask/archive/refs/tags/v2.5.10.tar.gz"
+          tar xzf /tmp/unitask.tar.gz -C /tmp
+          cp -R /tmp/UniTask-2.5.10/src/UniTask/Assets/Plugins/UniTask/Runtime/* "$A/unitask/"
+          find "$A/unitask" -name "*.asmdef" -delete
+          # SimpleFileBrowser
+          curl -sL -o /tmp/sfb.tar.gz "https://github.com/yasirkula/SimpleFileBrowser/archive/refs/heads/main.tar.gz"
+          tar xzf /tmp/sfb.tar.gz -C /tmp
+          cp -R /tmp/SimpleFileBrowser-main/Assets/SimpleFileBrowser/Runtime/* "$A/sfb/"
+          find "$A/sfb" -name "*.asmdef" -delete
+          # 自写 asmdef（name 与 Plugins DLL 同名）
+          cat > "$A/spine/spine-csharp/spine-csharp.asmdef" <<'EOF'
+          { "name": "spine-csharp", "allowUnsafeCode": true, "autoReferenced": true }
+          EOF
+          cat > "$A/spine/spine-unity.asmdef" <<'EOF'
+          { "name": "spine-unity", "allowUnsafeCode": true, "autoReferenced": true, "references": ["spine-csharp"] }
+          EOF
+          cat > "$A/unitask/UniTask.asmdef" <<'EOF'
+          { "name": "UniTask", "allowUnsafeCode": true, "autoReferenced": true }
+          EOF
+          cat > "$A/sfb/SimpleFileBrowser.Runtime.asmdef" <<'EOF'
+          { "name": "SimpleFileBrowser.Runtime", "autoReferenced": true }
+          EOF
+          echo "=== ThirdParty 结构 ==="
+          find "$A" -maxdepth 2 -type d | head -15
+
+      - name: 注入 CIPrepare 构建脚本
+        run: |
+          mkdir -p ExportedProject/ExportedProject/Assets/Editor
+          cat > ExportedProject/ExportedProject/Assets/Editor/CIPrepare.cs <<'CS'
+          using UnityEditor;
+          using UnityEditor.Build.Reporting;
+          using UnityEditor.PackageManager;
+          using UnityEngine;
+          using System.Linq;
+          using System.IO;
+          public static class CIPrepare {
+              static readonly string[] CopyList = {
+                  "Unity.RenderPipelines.Core.Runtime.dll",
+                  "Unity.RenderPipelines.Universal.Runtime.dll",
+                  "Unity.2D.Animation.Runtime.dll",
+                  "Unity.2D.Common.Runtime.dll",
+                  "Unity.2D.SpriteShape.Runtime.dll",
+                  "Unity.2D.Tilemap.Extras.dll",
+                  "Unity.TextMeshPro.dll",
+                  "Unity.Collections.dll",
+                  "Unity.Burst.dll",
+                  "Unity.Mathematics.dll",
+                  "Unity.VisualScripting.Core.dll",
+                  "spine-csharp.dll", "spine-unity.dll",
+                  "UniTask.dll", "SimpleFileBrowser.Runtime.dll",
+                  "UnityEngine.UI.dll"
+              };
+              static readonly string[] PackagesToRemove = {
+                  "com.unity.render-pipelines.universal",
+                  "com.unity.render-pipelines.core",
+                  "com.unity.shadergraph",
+                  "com.unity.2d.animation", "com.unity.2d.common",
+                  "com.unity.2d.spriteshape", "com.unity.2d.tilemap.extras",
+                  "com.unity.textmeshpro", "com.unity.burst",
+                  "com.unity.collections", "com.unity.mathematics",
+                  "com.unity.visualscripting"
+              };
+              public static void PrepareAndBuild() {
+                  var saDir = "Library/ScriptAssemblies";
+                  var tmp = "/tmp/pkgdll";
+                  // 迭代轮次幂等：包已移除时跳过
+                  if (!Directory.Exists(tmp) || !File.Exists(Path.Combine(tmp, "Unity.Burst.dll"))) {
+                      Directory.CreateDirectory(tmp);
+                      foreach (var f in CopyList) {
+                          var src = Path.Combine(saDir, f);
+                          if (File.Exists(src)) { File.Copy(src, Path.Combine(tmp, f), true); Debug.Log("[CI] staged " + f); }
+                          else Debug.LogWarning("[CI] not in ScriptAssemblies: " + f);
+                      }
+                      // 删第三方源码目录
+                      if (Directory.Exists("Assets/ThirdParty")) Directory.Delete("Assets/ThirdParty", true);
+                      if (File.Exists("Assets/ThirdParty.meta")) File.Delete("Assets/ThirdParty.meta");
+                      // 移除包（防同名冲突）
+                      try {
+                          var req = Client.Remove(PackagesToRemove);
+                          var sw = System.Diagnostics.Stopwatch.StartNew();
+                          while (!req.IsCompleted && sw.Elapsed.TotalSeconds < 300) System.Threading.Thread.Sleep(200);
+                          Debug.Log("[CI] Remove status: " + req.Status + " elapsed=" + sw.Elapsed.TotalSeconds + "s");
+                      } catch (System.Exception e) { Debug.LogWarning("[CI] Remove err: " + e.Message); }
+                      AssetDatabase.Refresh();
+                      while (EditorApplication.isCompiling) System.Threading.Thread.Sleep(300);
+                      // 真实 DLL 拷入 Plugins（meta 保留在位）
+                      foreach (var f in CopyList) {
+                          var src = Path.Combine(tmp, f);
+                          if (File.Exists(src)) { File.Copy(src, Path.Combine("Assets/Plugins", f), true); Debug.Log("[CI] copied " + f); }
+                      }
+                      AssetDatabase.Refresh();
+                      while (EditorApplication.isCompiling) System.Threading.Thread.Sleep(300);
+                  }
+                  BuildIOS();
+              }
+              static void BuildIOS() {
+                  var scenes = Directory.GetFiles("Assets", "*.unity", SearchOption.AllDirectories)
+                      .Where(p => !p.Contains("/Plugins/"))
+                      .Select(p => p.Replace("\\\\", "/"))
+                      .OrderBy(p => p)
+                      .ToArray();
+                  Debug.Log("CI: found " + scenes.Length + " scenes: " + string.Join(",", scenes.Take(10)));
+                  var opt = new BuildPlayerOptions {
+                      scenes = scenes.Length > 0 ? scenes : new[]{"Assets/Scenes/SampleScene.unity"},
+                      locationPathName = "iosbuild",
+                      target = BuildTarget.iOS,
+                      options = BuildOptions.None
+                  };
+                  var report = BuildPipeline.BuildPlayer(opt);
+                  Debug.Log("CI: result=" + report.summary.result + " size=" + report.summary.totalSize);
+                  if (report.summary.result != BuildResult.Succeeded) EditorApplication.Exit(2);
+              }
+          }
+          CS
+          echo "CIPrepare injected"
+
+      - name: 修复-构建迭代循环（20 轮）
+        run: |
+          set -x
+          cd ExportedProject/ExportedProject
+          UNI="$UNITY_EXE"
+          LOG="$PWD/unity_build.log"
+          SUCCESS=0
+          for ROUND in $(seq 1 20); do
+            echo "########## 迭代 $ROUND ##########"
+            rm -f "$LOG"
+            perl -e 'alarm 2400; exec @ARGV' "$UNI" \
+              -batchmode -nographics \
+              -projectPath "$PWD" \
+              -buildTarget iOS \
+              -executeMethod CIPrepare.PrepareAndBuild \
+              -logFile - 2>&1 | tee "$LOG"
+            echo "unity exit=$?"
+            if [ -d iosbuild/Unity-iPhone.xcodeproj ]; then
+              echo "XCODEPROJ_READY"
+              SUCCESS=1
+              break
+            fi
+            python3 "$GITHUB_WORKSPACE/tools/fix_compile_errors.py" "$LOG" "$PWD" || true
+            echo "--- 迭代 $ROUND 失败，日志尾部 ---"
+            tail -6 "$LOG" 2>/dev/null || true
+          done
+          [ "$SUCCESS" = "1" ] && echo "FINAL: SUCCESS" || echo "FINAL: NEED_MANUAL"
+          echo "--- 剩余错误清单 ---"
+          grep -E "error CS" "$LOG" 2>/dev/null | sort -u | head -30 || echo "(无)"
+
+      - name: xcodebuild 编译 ipa
+        run: |
+          cd ExportedProject/ExportedProject
+          [ -d iosbuild/Unity-iPhone.xcodeproj ] || { echo "no xcodeproj, build failed earlier"; exit 0; }
+          cd iosbuild
+          perl -e 'alarm 2700; exec @ARGV' xcodebuild -project Unity-iPhone.xcodeproj -scheme Unity-iPhone \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" -derivedDataPath dd build 2>&1 | tail -30
+          APP=$(find dd/Build/Products -name "*.app" | head -1)
+          echo "APP=$APP"
+          if [ -n "$APP" ]; then
+            mkdir -p Payload && cp -R "$APP" Payload/
+            zip -qr /tmp/PvzFusion-4.1-unsigned.ipa Payload
+            curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/${{ github.repository }}/releases \
+              -d '{"tag_name":"rebuild-41-ios","name":"PvZ Fusion 4.1 iOS（未签名，TrollStore 用）"}' > /dev/null
+            REL=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/${{ github.repository }}/releases/tags/rebuild-41-ios | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
+            curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @/tmp/PvzFusion-4.1-unsigned.ipa \
+              "https://uploads.github.com/repos/${{ github.repository }}/releases/$REL/assets?name=PvzFusion-4.1-unsigned.ipa" | python3 -c "import json,sys;d=json.load(sys.stdin);print('RELEASED:', d.get('name'), d.get('size'), d.get('message',''))"
+          fi
+
+      - name: 上传日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b23-logs
+          path: ExportedProject/ExportedProject/unity_build.log
+          if-no-files-found: ignore
