@@ -173,15 +173,19 @@ jobs:
           (cd /tmp/spine && git sparse-checkout set spine-unity/Assets/Spine 2>&1 | tail -1)
           cp -R /tmp/spine/spine-unity/Assets/Spine/Runtime/* "$A/spine/" 2>/dev/null || true
           find "$A/spine" -name "*.asmdef" -delete
-          # UniTask 2.5.10
-          curl -sL -o /tmp/unitask.tar.gz "https://github.com/Cysharp/UniTask/archive/refs/tags/v2.5.10.tar.gz"
+          # UniTask 2.5.10（tag 无 v 前缀）
+          curl -sfL -o /tmp/unitask.tar.gz "https://github.com/Cysharp/UniTask/archive/refs/tags/2.5.10.tar.gz" \
+            || curl -sfL -o /tmp/unitask.tar.gz "https://github.com/Cysharp/UniTask/archive/refs/tags/v2.5.10.tar.gz"
+          ls -la /tmp/unitask.tar.gz
           tar xzf /tmp/unitask.tar.gz -C /tmp
-          cp -R /tmp/UniTask-2.5.10/src/UniTask/Assets/Plugins/UniTask/Runtime/* "$A/unitask/"
+          UT_DIR=$(find /tmp -maxdepth 1 -type d -name "UniTask-*" | head -1)
+          cp -R "$UT_DIR/src/UniTask/Assets/Plugins/UniTask/Runtime/"* "$A/unitask/"
           find "$A/unitask" -name "*.asmdef" -delete
           # SimpleFileBrowser
-          curl -sL -o /tmp/sfb.tar.gz "https://github.com/yasirkula/SimpleFileBrowser/archive/refs/heads/main.tar.gz"
+          curl -sfL -o /tmp/sfb.tar.gz "https://github.com/yasirkula/SimpleFileBrowser/archive/refs/heads/main.tar.gz"
           tar xzf /tmp/sfb.tar.gz -C /tmp
-          cp -R /tmp/SimpleFileBrowser-main/Assets/SimpleFileBrowser/Runtime/* "$A/sfb/"
+          SFB_DIR=$(find /tmp -maxdepth 1 -type d -name "SimpleFileBrowser-*" | head -1)
+          cp -R "$SFB_DIR/Assets/SimpleFileBrowser/Runtime/"* "$A/sfb/"
           find "$A/sfb" -name "*.asmdef" -delete
           # 自写 asmdef（name 与 Plugins DLL 同名）
           cat > "$A/spine/spine-csharp/spine-csharp.asmdef" <<'EOF'
