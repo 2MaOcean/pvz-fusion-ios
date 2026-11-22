@@ -178,13 +178,18 @@ jobs:
             || curl -sfL -o /tmp/unitask.tar.gz "https://github.com/Cysharp/UniTask/archive/refs/tags/v2.5.10.tar.gz"
           ls -la /tmp/unitask.tar.gz
           tar xzf /tmp/unitask.tar.gz -C /tmp
-          UT_DIR=$(find /tmp -maxdepth 1 -type d -name "UniTask-*" | head -1)
+          # macOS 的 /tmp 是符号链接，find 需 -L 跟随；已知名兜底
+          UT_DIR=$(find -L /private/tmp -maxdepth 1 -type d -name "UniTask-*" 2>/dev/null | head -1)
+          [ -z "$UT_DIR" ] && UT_DIR=/tmp/UniTask-2.5.10
+          echo "UT_DIR=$UT_DIR"
           cp -R "$UT_DIR/src/UniTask/Assets/Plugins/UniTask/Runtime/"* "$A/unitask/"
           find "$A/unitask" -name "*.asmdef" -delete
           # SimpleFileBrowser
           curl -sfL -o /tmp/sfb.tar.gz "https://github.com/yasirkula/SimpleFileBrowser/archive/refs/heads/main.tar.gz"
           tar xzf /tmp/sfb.tar.gz -C /tmp
-          SFB_DIR=$(find /tmp -maxdepth 1 -type d -name "SimpleFileBrowser-*" | head -1)
+          SFB_DIR=$(find -L /private/tmp -maxdepth 1 -type d -name "SimpleFileBrowser-*" 2>/dev/null | head -1)
+          [ -z "$SFB_DIR" ] && SFB_DIR=/tmp/SimpleFileBrowser-main
+          echo "SFB_DIR=$SFB_DIR"
           cp -R "$SFB_DIR/Assets/SimpleFileBrowser/Runtime/"* "$A/sfb/"
           find "$A/sfb" -name "*.asmdef" -delete
           # 自写 asmdef（name 与 Plugins DLL 同名）
