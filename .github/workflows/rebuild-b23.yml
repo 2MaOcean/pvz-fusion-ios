@@ -167,15 +167,18 @@ jobs:
           set -x
           A=ExportedProject/ExportedProject/Assets/ThirdParty
           mkdir -p "$A/spine" "$A/unitask" "$A/sfb"
-          # spine 4.1（sparse clone，只要 Runtime）
-          git clone --depth 1 --filter=blob:none --sparse --branch 4.1 \
-            https://github.com/EsotericSoftware/spine-runtimes /tmp/spine 2>&1 | tail -1
+          # spine 4.1（sparse clone，只要 Runtime；失败自动重试 2 次）
+          for TRY in 1 2 3; do
+            git clone --depth 1 --filter=blob:none --sparse --branch 4.1 \
+              https://github.com/EsotericSoftware/spine-runtimes /tmp/spine 2>&1 | tail -1 && break
+            rm -rf /tmp/spine; sleep 10
+          done
           (cd /tmp/spine && git sparse-checkout set spine-unity/Assets/Spine 2>&1 | tail -1)
           cp -R /tmp/spine/spine-unity/Assets/Spine/Runtime/* "$A/spine/" 2>/dev/null || true
           find "$A/spine" -name "*.asmdef" -delete
-          # UniTask 2.5.10（tag 无 v 前缀）
-          curl -sfL -o /tmp/unitask.tar.gz "https://github.com/Cysharp/UniTask/archive/refs/tags/2.5.10.tar.gz" \
-            || curl -sfL -o /tmp/unitask.tar.gz "https://github.com/Cysharp/UniTask/archive/refs/tags/v2.5.10.tar.gz"
+          # UniTask 2.5.10（tag 无 v 前缀；curl 带全错误重试防网络抖动）
+          curl -sfL --retry 5 --retry-all-errors --retry-delay 8 -o /tmp/unitask.tar.gz "https://github.com/Cysharp/UniTask/archive/refs/tags/2.5.10.tar.gz" \
+            || curl -sfL --retry 5 --retry-all-errors --retry-delay 8 -o /tmp/unitask.tar.gz "https://github.com/Cysharp/UniTask/archive/refs/tags/v2.5.10.tar.gz"
           ls -la /tmp/unitask.tar.gz
           tar xzf /tmp/unitask.tar.gz -C /tmp
           # macOS 的 /tmp 是符号链接，find 需 -L 跟随；已知名兜底
@@ -184,8 +187,9 @@ jobs:
           echo "UT_DIR=$UT_DIR"
           cp -R "$UT_DIR/src/UniTask/Assets/Plugins/UniTask/Runtime/"* "$A/unitask/"
           find "$A/unitask" -name "*.asmdef" -delete
-          # SimpleFileBrowser
-          curl -sfL -o /tmp/sfb.tar.gz "https://github.com/yasirkula/SimpleFileBrowser/archive/refs/heads/main.tar.gz"
+          # SimpleFileBrowser（带重试）
+          curl -sfL --retry 5 --retry-all-errors --retry-delay 8 -o /tmp/sfb.tar.gz "https://github.com/yasirkula/SimpleFileBrowser/archive/refs/heads/main.tar.gz"
+          ls -la /tmp/sfb.tar.gz
           tar xzf /tmp/sfb.tar.gz -C /tmp
           SFB_DIR=$(find -L /private/tmp -maxdepth 1 -type d -name "SimpleFileBrowser-*" 2>/dev/null | head -1)
           [ -z "$SFB_DIR" ] && SFB_DIR=/tmp/SimpleFileBrowser-main
