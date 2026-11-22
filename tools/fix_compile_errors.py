@@ -98,7 +98,7 @@ def fix_cs0246():
         sp = os.path.join(stub_dir, f'Stub_{t}.cs')
         if not os.path.exists(sp):
             open(sp, 'w', encoding='utf-8').write(
-                f'// 自动生成的缺失类型桩\nnamespace UnityEngine {{ public class {t} {{ }} }}\n')
+                f'// 自动生成的缺失类型桩（全局命名空间）\npublic class {t} : UnityEngine.MonoBehaviour {{ }}\n')
             n += 1
             print(f"  CS0246 stub: {t}")
     return n
