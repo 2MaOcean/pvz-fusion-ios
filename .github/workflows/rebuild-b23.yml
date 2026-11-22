@@ -174,8 +174,10 @@ jobs:
               https://github.com/EsotericSoftware/spine-runtimes /tmp/spine 2>&1 | tail -1 && break
             rm -rf /tmp/spine; sleep 10
           done
-          (cd /tmp/spine && git sparse-checkout set spine-unity/Assets/Spine 2>&1 | tail -1)
+          (cd /tmp/spine && git sparse-checkout set spine-unity/Assets/Spine spine-csharp/src 2>&1 | tail -1)
           cp -R /tmp/spine/spine-unity/Assets/Spine/Runtime/* "$A/spine/" 2>/dev/null || true
+          # spine-csharp 核心源码（Runtime/spine-csharp/ 只是占位「add spine-csharp here.txt」）
+          cp -R /tmp/spine/spine-csharp/src/* "$A/spine/" 2>/dev/null || true
           # 连 .asmdef.meta 一起删（孤儿 meta 会让 Unity 把子目录 .cs 分配给不存在的程序集）
           find "$A/spine" -name "*.asmdef*" -delete
           # spine 合并为单一程序集（spine-csharp + spine-unity 同程序集，无引用问题）
