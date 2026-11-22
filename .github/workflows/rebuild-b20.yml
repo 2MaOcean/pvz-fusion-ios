@@ -1,0 +1,136 @@
+name: Rebuild 4.1 — Stage B20 (Plugins DLL 诊断与清理 + 构建)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    timeout-minutes: 360
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 恢复 Unity
+        id: unity
+        uses: actions/cache@v4
+        with:
+          path: /Applications/Unity
+          key: unity-2021.3.45f1-arm64-ios
+
+      - name: Hub + license 目录 + 激活
+        run: |
+          brew install --cask unity-hub >/dev/null 2>&1 || true
+          sudo xattr -dr com.apple.quarantine "/Applications/Unity Hub.app" 2>/dev/null || true
+          sudo mkdir -p "/Library/Application Support/Unity"
+          sudo chown -R "$(whoami)" "/Library/Application Support/Unity"
+          npm install -g @rage-against-the-pixel/unity-cli@3 2>&1 | tail -1
+          for ip in $(dig +short A public-cdn.cloud.unity3d.com | grep -E '^[0-9]+\.'); do
+            echo "block drop out proto tcp to $ip port 443" | sudo tee -a /tmp/pfrules
+          done
+          (echo "set skip on lo0"; cat /tmp/pfrules) | sudo pfctl -f - 2>/dev/null || true
+          sudo pfctl -e 2>/dev/null || true
+          unity-cli activate-license -l personal \
+            -e "${{ secrets.UNITY_EMAIL }}" \
+            -p "${{ secrets.UNITY_PASSWORD }}" 2>&1 | grep -vi password | head -10 || true
+
+      - name: 下载 ExportedProject + Plugins DLL 诊断
+        run: |
+          curl -sL -o ep.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
+          tar xzf ep.tar.gz
+          echo "=== Assets/Plugins 全部 DLL（大小排序，找 0 字节/异常小）==="
+          find ExportedProject/ExportedProject/Assets -name "*.dll" -exec ls -la {} \; | awk '{print $5, $9}' | sort -n | head -40
+          echo "=== 0 字节或 <10KB 的 dll ==="
+          find ExportedProject/ExportedProject/Assets -name "*.dll" -size -10k | head -20
+          echo "=== Plugins 目录结构 ==="
+          find ExportedProject/ExportedProject/Assets/Plugins -type d | head -15
+
+      - name: 清理损坏/可疑 DLL（<10KB 的全删，x64 原生插件排除）
+        run: |
+          # 删除异常小的 dll（损坏标志）
+          find ExportedProject/ExportedProject/Assets -name "*.dll" -size -10k -delete -print | head -20
+          # x64 Windows 原生插件目录（iOS 不需要）
+          find ExportedProject/ExportedProject/Assets -type d -name "x86_64" | head -5
+          find ExportedProject/ExportedProject/Assets -path "*x86_64*" -name "*.dll" -delete -print | head -10 || true
+          echo "清理完成"
+
+      - name: 注入 CI 构建脚本
+        run: |
+          mkdir -p ExportedProject/ExportedProject/Assets/Editor
+          cat > ExportedProject/ExportedProject/Assets/Editor/CIOSBuild.cs <<'CS'
+          using UnityEditor;
+          using UnityEditor.Build.Reporting;
+          using UnityEngine;
+          using System.Linq;
+          using System.IO;
+          public static class CIOSBuild {
+              public static void Build() {
+                  var scenes = Directory.GetFiles("Assets", "*.unity", SearchOption.AllDirectories)
+                      .Where(p => !p.Contains("/Plugins/"))
+                      .Select(p => p.Replace("\\\\", "/"))
+                      .OrderBy(p => p)
+                      .ToArray();
+                  Debug.Log("CI: found " + scenes.Length + " scenes: " + string.Join(",", scenes.Take(10)));
+                  var opt = new BuildPlayerOptions {
+                      scenes = scenes.Length > 0 ? scenes : new[]{"Assets/Scenes/SampleScene.unity"},
+                      locationPathName = "iosbuild",
+                      target = BuildTarget.iOS,
+                      options = BuildOptions.None
+                  };
+                  var report = BuildPipeline.BuildPlayer(opt);
+                  Debug.Log("CI: result=" + report.summary.result + " size=" + report.summary.totalSize);
+                  if (report.summary.result != BuildResult.Succeeded) EditorApplication.Exit(2);
+              }
+          }
+          CS
+          echo "script injected"
+
+      - name: Unity 构建（alarm 35 分钟/次 × 2）
+        run: |
+          cd ExportedProject/ExportedProject
+          for ATTEMPT in 1 2; do
+            echo "===== 构建尝试 $ATTEMPT ====="
+            perl -e 'alarm 2100; exec @ARGV' "$UNITY_EXE" -batchmode -nographics \
+              -projectPath "$PWD" \
+              -buildTarget iOS \
+              -executeMethod CIOSBuild.Build \
+              -logFile - 2>&1 | tee "$PWD/unity_build.log" | grep -iE "error|Failed|Exception|result=" | head -20 || true
+            [ -d iosbuild/Unity-iPhone.xcodeproj ] && echo "XCODEPROJ_READY" && break
+            echo "--- 尝试 $ATTEMPT 失败 ---"
+            grep -iE "Exception|error" "$PWD/unity_build.log" 2>/dev/null | grep -viE "Licensing" | tail -15 || true
+          done
+          echo "--- 最终产物 ---"
+          ls -la iosbuild 2>/dev/null | head -10 || echo "no iosbuild"
+          du -sh iosbuild 2>/dev/null || true
+
+      - name: xcodebuild 编译 ipa
+        run: |
+          cd ExportedProject/ExportedProject
+          [ -d iosbuild/Unity-iPhone.xcodeproj ] || { echo "no xcodeproj, build failed earlier"; exit 0; }
+          cd iosbuild
+          perl -e 'alarm 2700; exec @ARGV' xcodebuild -project Unity-iPhone.xcodeproj -scheme Unity-iPhone \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" -derivedDataPath dd build 2>&1 | tail -30
+          APP=$(find dd/Build/Products -name "*.app" | head -1)
+          echo "APP=$APP"
+          if [ -n "$APP" ]; then
+            mkdir -p Payload && cp -R "$APP" Payload/
+            zip -qr /tmp/PvzFusion-4.1-unsigned.ipa Payload
+            curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/${{ github.repository }}/releases \
+              -d '{"tag_name":"rebuild-41-ios","name":"PvZ Fusion 4.1 iOS（未签名，TrollStore 用）"}' > /dev/null
+            REL=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/${{ github.repository }}/releases/tags/rebuild-41-ios | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
+            curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @/tmp/PvzFusion-4.1-unsigned.ipa \
+              "https://uploads.github.com/repos/${{ github.repository }}/releases/$REL/assets?name=PvzFusion-4.1-unsigned.ipa" | python3 -c "import json,sys;d=json.load(sys.stdin);print('RELEASED:', d.get('name'), d.get('size'), d.get('message',''))"
+          fi
+
+      - name: 上传日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b20-logs
+          path: ExportedProject/ExportedProject/unity_build.log
+          if-no-files-found: ignore
