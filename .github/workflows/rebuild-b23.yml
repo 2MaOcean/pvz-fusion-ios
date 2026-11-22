@@ -176,25 +176,19 @@ jobs:
           (cd /tmp/spine && git sparse-checkout set spine-unity/Assets/Spine 2>&1 | tail -1)
           cp -R /tmp/spine/spine-unity/Assets/Spine/Runtime/* "$A/spine/" 2>/dev/null || true
           find "$A/spine" -name "*.asmdef" -delete
-          # UniTask 2.5.10（tag 无 v 前缀；curl 带全错误重试防网络抖动）
-          curl -sfL --retry 5 --retry-all-errors --retry-delay 8 -o /tmp/unitask.tar.gz "https://github.com/Cysharp/UniTask/archive/refs/tags/2.5.10.tar.gz" \
-            || curl -sfL --retry 5 --retry-all-errors --retry-delay 8 -o /tmp/unitask.tar.gz "https://github.com/Cysharp/UniTask/archive/refs/tags/v2.5.10.tar.gz"
-          ls -la /tmp/unitask.tar.gz
-          tar xzf /tmp/unitask.tar.gz -C /tmp
-          # macOS 的 /tmp 是符号链接，find 需 -L 跟随；已知名兜底
-          UT_DIR=$(find -L /private/tmp -maxdepth 1 -type d -name "UniTask-*" 2>/dev/null | head -1)
-          [ -z "$UT_DIR" ] && UT_DIR=/tmp/UniTask-2.5.10
-          echo "UT_DIR=$UT_DIR"
-          cp -R "$UT_DIR/src/UniTask/Assets/Plugins/UniTask/Runtime/"* "$A/unitask/"
+          # UniTask 2.5.10（git clone 更稳，codeload archive 会限流）
+          for TRY in 1 2 3; do
+            git clone --depth 1 --branch 2.5.10 https://github.com/Cysharp/UniTask /tmp/unitask-repo 2>&1 | tail -1 && break
+            rm -rf /tmp/unitask-repo; sleep 10
+          done
+          cp -R /tmp/unitask-repo/src/UniTask/Assets/Plugins/UniTask/Runtime/* "$A/unitask/"
           find "$A/unitask" -name "*.asmdef" -delete
-          # SimpleFileBrowser（带重试）
-          curl -sfL --retry 5 --retry-all-errors --retry-delay 8 -o /tmp/sfb.tar.gz "https://github.com/yasirkula/SimpleFileBrowser/archive/refs/heads/main.tar.gz"
-          ls -la /tmp/sfb.tar.gz
-          tar xzf /tmp/sfb.tar.gz -C /tmp
-          SFB_DIR=$(find -L /private/tmp -maxdepth 1 -type d -name "SimpleFileBrowser-*" 2>/dev/null | head -1)
-          [ -z "$SFB_DIR" ] && SFB_DIR=/tmp/SimpleFileBrowser-main
-          echo "SFB_DIR=$SFB_DIR"
-          cp -R "$SFB_DIR/Assets/SimpleFileBrowser/Runtime/"* "$A/sfb/"
+          # SimpleFileBrowser（git clone）
+          for TRY in 1 2 3; do
+            git clone --depth 1 https://github.com/yasirkula/SimpleFileBrowser /tmp/sfb-repo 2>&1 | tail -1 && break
+            rm -rf /tmp/sfb-repo; sleep 10
+          done
+          cp -R /tmp/sfb-repo/Assets/SimpleFileBrowser/Runtime/* "$A/sfb/"
           find "$A/sfb" -name "*.asmdef" -delete
           # 自写 asmdef（name 与 Plugins DLL 同名）
           cat > "$A/spine/spine-csharp/spine-csharp.asmdef" <<'EOF'
