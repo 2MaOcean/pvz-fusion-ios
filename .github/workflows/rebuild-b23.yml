@@ -167,7 +167,8 @@ jobs:
           set -x
           A=ExportedProject/ExportedProject/Assets/ThirdParty
           mkdir -p "$A/spine" "$A/unitask" "$A/sfb"
-          # spine 4.1（sparse clone，只要 Runtime；失败自动重试 2 次）
+          set -o pipefail
+          # spine 4.1（sparse clone，只要 Runtime）
           for TRY in 1 2 3; do
             git clone --depth 1 --filter=blob:none --sparse --branch 4.1 \
               https://github.com/EsotericSoftware/spine-runtimes /tmp/spine 2>&1 | tail -1 && break
@@ -176,16 +177,16 @@ jobs:
           (cd /tmp/spine && git sparse-checkout set spine-unity/Assets/Spine 2>&1 | tail -1)
           cp -R /tmp/spine/spine-unity/Assets/Spine/Runtime/* "$A/spine/" 2>/dev/null || true
           find "$A/spine" -name "*.asmdef" -delete
-          # UniTask 2.5.10（git clone 更稳，codeload archive 会限流）
+          # UniTask 2.5.10（git clone，codeload archive 会限流）
           for TRY in 1 2 3; do
             git clone --depth 1 --branch 2.5.10 https://github.com/Cysharp/UniTask /tmp/unitask-repo 2>&1 | tail -1 && break
             rm -rf /tmp/unitask-repo; sleep 10
           done
           cp -R /tmp/unitask-repo/src/UniTask/Assets/Plugins/UniTask/Runtime/* "$A/unitask/"
           find "$A/unitask" -name "*.asmdef" -delete
-          # SimpleFileBrowser（git clone）
+          # SimpleFileBrowser（正确 repo 名：UnitySimpleFileBrowser）
           for TRY in 1 2 3; do
-            git clone --depth 1 https://github.com/yasirkula/SimpleFileBrowser /tmp/sfb-repo 2>&1 | tail -1 && break
+            git clone --depth 1 https://github.com/yasirkula/UnitySimpleFileBrowser /tmp/sfb-repo 2>&1 | tail -1 && break
             rm -rf /tmp/sfb-repo; sleep 10
           done
           cp -R /tmp/sfb-repo/Assets/SimpleFileBrowser/Runtime/* "$A/sfb/"
