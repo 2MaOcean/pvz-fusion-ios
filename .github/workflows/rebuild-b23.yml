@@ -176,7 +176,8 @@ jobs:
           done
           (cd /tmp/spine && git sparse-checkout set spine-unity/Assets/Spine 2>&1 | tail -1)
           cp -R /tmp/spine/spine-unity/Assets/Spine/Runtime/* "$A/spine/" 2>/dev/null || true
-          find "$A/spine" -name "*.asmdef" -delete
+          # 连 .asmdef.meta 一起删（孤儿 meta 会让 Unity 把子目录 .cs 分配给不存在的程序集）
+          find "$A/spine" -name "*.asmdef*" -delete
           # spine 合并为单一程序集（spine-csharp + spine-unity 同程序集，无引用问题）
           # UniTask 2.5.10（git clone，codeload archive 会限流）
           for TRY in 1 2 3; do
@@ -184,7 +185,7 @@ jobs:
             rm -rf /tmp/unitask-repo; sleep 10
           done
           cp -R /tmp/unitask-repo/src/UniTask/Assets/Plugins/UniTask/Runtime/* "$A/unitask/"
-          find "$A/unitask" -name "*.asmdef" -delete
+          find "$A/unitask" -name "*.asmdef*" -delete
           # SimpleFileBrowser（正确路径：Plugins/SimpleFileBrowser 含全套 Prefabs/Resources）
           for TRY in 1 2 3; do
             git clone --depth 1 https://github.com/yasirkula/UnitySimpleFileBrowser /tmp/sfb-repo 2>&1 | tail -1 && break
@@ -192,7 +193,7 @@ jobs:
           done
           ls /tmp/sfb-repo/Plugins/SimpleFileBrowser/ | head -5
           cp -R /tmp/sfb-repo/Plugins/SimpleFileBrowser/* "$A/sfb/"
-          find "$A/sfb" -name "*.asmdef" -delete
+          find "$A/sfb" -name "*.asmdef*" -delete
           # 自写 asmdef（name 与 Plugins DLL 同名；asmdef 之间必须显式引用）
           cat > "$A/spine/spine-unity.asmdef" <<'EOF'
           { "name": "spine-unity", "allowUnsafeCode": true, "autoReferenced": true }
