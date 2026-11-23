@@ -136,13 +136,19 @@ def _find_class_file(cls, extra_dirs):
     lst = idx.get(cls) or []
     return lst[0] if lst else None
 
+LIFECYCLE_METHODS = {
+    'Awake', 'Start', 'Update', 'FixedUpdate', 'LateUpdate', 'OnEnable', 'OnDisable',
+    'OnDestroy', 'OnApplicationPause', 'OnApplicationQuit', 'OnGUI', 'OnDrawGizmos',
+    'OnDrawGizmosSelected', 'OnValidate', 'Reset', 'OnApplicationFocus', 'OnTriggerEnter',
+    'OnTriggerExit', 'OnTriggerStay', 'OnCollisionEnter', 'OnCollisionExit', 'OnCollisionStay',
+}
+
 def fix_cs0115():
-    """错误形如 'X.M(args)': no suitable method found to override
-    → 从 X 的类声明提取基类名，在基类文件里给方法 M 加 virtual（继承链靠迭代收敛）。"""
+    """'X.M()': no suitable method found to override
+    → 沿继承链向上：基类方法是普通方法则加 virtual；是 override 则继续向上；
+    追到引擎基类（MonoBehaviour 等）则是反编译错加的 override，直接删除 override 关键字。"""
     n = 0
-    done_files = {}
     seen = set()
-    seen_debug = {}
     for f, ln, msg in by_code.get('CS0115', []):
         m = re.match(r"'([\w.]+)\.([\w<>]+)[^']*': no suitable method found to override", msg)
         if not m:
@@ -152,50 +158,70 @@ def fix_cs0115():
         if key in seen:
             continue
         seen.add(key)
-        # 错误文件 → 类声明 → 基类名
-        err_file = os.path.join(root, f)
-        base_cls = None
-        try:
-            src = open(err_file, encoding='utf-8', errors='ignore').read()
-        except Exception as e:
-            print(f"  CS0115 debug: 读错误文件失败 {err_file}: {e}")
-            continue
-        cm = re.search(r'\bclass\s+' + re.escape(cls) + r'\b[^{]*:\s*([A-Za-z_][\w.]*)', src)
-        if cm:
-            base_cls = cm.group(1).split('.')[-1]
-        else:
-            print(f"  CS0115 debug: {cls} 在 {f} 中未匹配到基类声明（文件存在={os.path.exists(err_file)}，含class={'class' in src}）")
-            base_cls = cls
-        if not base_cls or base_cls in ('MonoBehaviour', 'ScriptableObject', 'object', 'Object'):
-            print(f"  CS0115 debug: {cls} 基类={base_cls} 跳过（引擎基类）")
-            continue
-        base_file = _find_class_file(base_cls, [os.path.dirname(err_file)])
-        if not base_file:
-            if cls == base_cls or seen_debug.get(base_cls) is None:
-                seen_debug[base_cls] = 1
-                print(f"  CS0115 debug: 基类 {base_cls} 的文件未找到（搜 Assets/Scripts + Assets/CoreSrc）")
-            continue
-        if base_file not in done_files:
+
+        cur_cls, cur_file = cls, os.path.join(root, f)
+        chain = 0
+        prev_override_file = cur_file  # 最初错误文件（追到引擎时删它的 override）
+        while chain < 8:
+            chain += 1
             try:
-                done_files[base_file] = open(base_file, encoding='utf-8', errors='ignore').read()
+                src = open(cur_file, encoding='utf-8', errors='ignore').read()
             except Exception:
-                continue
-        src = done_files[base_file]
-        pat = re.compile(
-            r'^(\s*)((?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)'
-            r'(?:\s+static)?(?:\s+sealed)?(?:\s+extern)?(?:\s+new)?(?:\s+unsafe)?)'
-            r'(\s+(?!virtual\b|abstract\b|static\b|override\b|extern\b|partial\b))'
-            r'((?:[\w<>\[\],.?:\s]+?)\s+)?' + re.escape(meth) + r'\s*<*\s*\(',
-            re.M)
-        def add_virtual(mm):
-            indent, mods, rest = mm.group(1), mm.group(2).strip(), mm.group(4) or ''
-            return f"{indent}{mods} virtual {rest}{meth}<*(" if False else f"{indent}{mods} virtual {rest}{meth}("
-        new_src, cnt = pat.subn(add_virtual, src, count=1)
-        if cnt:
-            done_files[base_file] = new_src
-            open(base_file, 'w', encoding='utf-8').write(new_src)
-            n += 1
-            print(f"  CS0115: {os.path.basename(base_file)}({base_cls}).{meth} → virtual")
+                cur_file = None
+                break
+            # 当前类的方法声明
+            mdecl = re.search(
+                r'^(\s*)((?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)'
+                r'(?:\s+static)?(?:\s+sealed)?(?:\s+extern)?(?:\s+new)?(?:\s+unsafe)?)'
+                r'(\s+(?:virtual|override|abstract|static|new)?\s*)'
+                r'((?:[\w<>\[\],.?:]+?)\s+)?' + re.escape(meth) + r'\s*<*\s*\(',
+                src, re.M)
+            if not mdecl:
+                break  # 当前文件无此方法（理论少见）
+            mods = mdecl.group(2) + (mdecl.group(3) or '')
+            if 'virtual' in mods or 'abstract' in mods:
+                break  # 已是虚方法（前轮修好），本轮不动
+            if 'override' not in mods:
+                # 普通方法 → 加 virtual
+                pat = re.compile(
+                    r'^(\s*)((?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)'
+                    r'(?:\s+static)?(?:\s+sealed)?(?:\s+extern)?(?:\s+new)?(?:\s+unsafe)?)'
+                    r'(\s+(?!virtual\b|abstract\b|static\b|override\b|extern\b|partial\b))'
+                    r'((?:[\w<>\[\],.?:]+?)\s+)?' + re.escape(meth) + r'\s*<*\s*\(',
+                    re.M)
+                def _addv(mm):
+                    ind, mo, rest = mm.group(1), mm.group(2).strip(), mm.group(4) or ''
+                    return f"{ind}{mo} virtual {rest}{meth}("
+                new_src, cnt = pat.subn(_addv, src, count=1)
+                if cnt:
+                    open(cur_file, 'w', encoding='utf-8').write(new_src)
+                    n += 1
+                    print(f"  CS0115: {os.path.basename(cur_file)}({cur_cls}).{meth} → virtual")
+                break
+            # 是 override → 看类基类继续向上
+            cm = re.search(r'\bclass\s+' + re.escape(cur_cls) + r'\b[^{]*:\s*([A-Za-z_][\w.]*)', src)
+            if not cm:
+                break
+            nxt = cm.group(1).split('.')[-1]
+            if nxt in ('MonoBehaviour', 'ScriptableObject', 'object', 'Object') or nxt == cur_cls:
+                # 追到引擎：最初错误文件里错加的 override → 删除（仅生命周期方法）
+                if meth in LIFECYCLE_METHODS:
+                    esrc = open(prev_override_file, encoding='utf-8', errors='ignore').read()
+                    pat2 = re.compile(
+                        r'(\b(?:public|protected|internal|private)\s+)override(\s+(?:[\w<>\[\],.?:]+?)\s+)'
+                        + re.escape(meth) + r'\s*<*\s*\(')
+                    new_src, cnt = pat2.subn(r'\1\2' + meth + '(', esrc, count=1)
+                    if cnt:
+                        open(prev_override_file, 'w', encoding='utf-8').write(new_src)
+                        n += 1
+                        print(f"  CS0115: {os.path.basename(prev_override_file)}.{meth} 删除 override（生命周期方法）")
+                break
+            # 继续向上
+            nxt_file = _find_class_file(nxt, [os.path.dirname(cur_file)])
+            if not nxt_file:
+                break
+            prev_override_file = cur_file
+            cur_cls, cur_file = nxt, nxt_file
     return n
 
 if 'CS0104' in by_code: stats.append(('CS0104', fix_cs0104()))
