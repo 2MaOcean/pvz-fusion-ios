@@ -67,12 +67,15 @@ for p in files:
         continue
     lines = src.split('\n')
     cur_cls = None
+    cur_kind = 'class'
     changed = False
     for i, line in enumerate(lines):
-        cm = re.search(r'\bclass\s+([A-Za-z_]\w*)', line)
+        cm = re.search(r'\b(class|struct|interface)\s+([A-Za-z_]\w*)', line)
         if cm:
-            cur_cls = cm.group(1)
-        # 构造函数（名字 == 类名）跳过
+            cur_cls = cm.group(2)
+            cur_kind = cm.group(1)
+        if cur_kind != 'class':
+            continue  # struct/interface 成员不能 virtual
         cm2 = METHOD_PAT.search(line)
         if not cm2:
             continue
@@ -82,10 +85,10 @@ for p in files:
             continue  # 构造
         if re.search(r'\b(static|virtual|override|abstract|const|event)\b', mods_full):
             continue  # 已有修饰，不动
-        if 'get;' in line or 'set;' in line or '=>' in line and '{' not in line.split('=>')[0]:
-            pass  # 属性也虚化（允许）
+        if re.search(r'\bprivate\b', mods_full):
+            continue  # private 不能 virtual
         lines[i] = re.sub(
-            r'(\b(?:public|protected|internal|private)\b)',
+            r'(\b(?:public|protected|internal)\b)',
             r'\1 virtual', line, count=1)
         changed = True
         n_virtual_added += 1
@@ -118,8 +121,7 @@ for p in files:
 print(f"发现 {len(overrides)} 个 override 声明")
 
 def has_member_upstream(start_cls, meth, max_depth=10):
-    """沿继承链向上找同名成员（virtual/普通/abstract 都算）；返回 True 找到"""
-    cur = class_base.get(start_cls)
+    """沿继承链向上找同名成员；普通方法当场加 virtual（级联）；返回 True 找到"""
     cls = start_cls
     depth = 0
     while cls and depth < max_depth:
@@ -134,6 +136,14 @@ def has_member_upstream(start_cls, meth, max_depth=10):
         bsrc = get_src(bfile)
         # 基类里有没有同名成员（方法或属性）
         if re.search(r'\b' + re.escape(meth) + r'\s*(?:\(|\{|=>)', bsrc):
+            # 普通方法 → 当场加 virtual（保证派生类 override 合法）
+            bsrc2, cnt = re.subn(
+                r'(\b(?:public|protected|internal)\b)(\s+)((?!virtual\b|abstract\b|static\b|override\b)[\w<>,\s]*?\s*)'
+                + r'(\b' + re.escape(meth) + r'\b)',
+                r'\1 virtual\2\4', bsrc, count=1)
+            if cnt and bsrc2 != bsrc:
+                srcs[bfile] = bsrc2
+                written.add(bfile)
             return True
         cls = base
         depth += 1
