@@ -169,29 +169,29 @@ def fix_cs0115():
             except Exception:
                 cur_file = None
                 break
-            # 当前类的方法声明
+            # 当前类的方法/属性声明（属性无括号，形如 int BuffType { 或 =>）
             mdecl = re.search(
                 r'^(\s*)((?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)'
                 r'(?:\s+static)?(?:\s+sealed)?(?:\s+extern)?(?:\s+new)?(?:\s+unsafe)?)'
                 r'(\s+(?:virtual|override|abstract|static|new)?\s*)'
-                r'((?:[\w<>\[\],.?:]+?)\s+)?' + re.escape(meth) + r'\s*<*\s*\(',
+                r'((?:[\w<>\[\],.?:]+?)\s+)?' + re.escape(meth) + r'\s*<*\s*(?:\(|\{|=>)',
                 src, re.M)
             if not mdecl:
-                break  # 当前文件无此方法（理论少见）
+                break  # 当前文件无此方法/属性（理论少见）
             mods = mdecl.group(2) + (mdecl.group(3) or '')
             if 'virtual' in mods or 'abstract' in mods:
                 break  # 已是虚方法（前轮修好），本轮不动
             if 'override' not in mods:
-                # 普通方法 → 加 virtual
+                # 普通方法/属性 → 加 virtual
                 pat = re.compile(
                     r'^(\s*)((?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)'
                     r'(?:\s+static)?(?:\s+sealed)?(?:\s+extern)?(?:\s+new)?(?:\s+unsafe)?)'
                     r'(\s+(?!virtual\b|abstract\b|static\b|override\b|extern\b|partial\b))'
-                    r'((?:[\w<>\[\],.?:]+?)\s+)?' + re.escape(meth) + r'\s*<*\s*\(',
+                    r'((?:[\w<>\[\],.?:]+?)\s+)?(?=' + re.escape(meth) + r'\s*<*\s*(?:\(|\{|=>))',
                     re.M)
                 def _addv(mm):
                     ind, mo, rest = mm.group(1), mm.group(2).strip(), mm.group(4) or ''
-                    return f"{ind}{mo} virtual {rest}{meth}("
+                    return f"{ind}{mo} virtual {rest}"
                 new_src, cnt = pat.subn(_addv, src, count=1)
                 if cnt:
                     open(cur_file, 'w', encoding='utf-8').write(new_src)

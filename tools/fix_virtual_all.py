@@ -72,7 +72,7 @@ def method_kind(src, cls, meth):
         r'^(\s*)((?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)'
         r'(?:\s+static)?(?:\s+sealed)?(?:\s+extern)?(?:\s+new)?(?:\s+unsafe)?)'
         r'(\s+(virtual|override|abstract|static|new|extern|unsafe)\s*|\s+)'
-        r'((?:[\w<>\[\],.?:]+?)\s+)?' + re.escape(meth) + r'\s*<*\s*\(',
+        r'((?:[\w<>\[\],.?:]+?)\s+)?' + re.escape(meth) + r'\s*<*\s*(?:\(|\{|=>)',
         region, re.M)
     if not mm:
         return 'none', None
@@ -100,7 +100,7 @@ for p in files:
         if cm:
             cur_cls = cm.group(1)
             continue
-        om = re.search(r'\boverride\s+(?:[\w<>\[\],.?:]+?)\s+([A-Za-z_]\w*)\s*<*\s*\(', line)
+        om = re.search(r'\boverride\s+(?:[\w<>\[\],.?:]+?)\s+([A-Za-z_]\w*)', line)
         if om and cur_cls:
             key = (cur_cls, om.group(1))
             if key not in seen:
@@ -163,10 +163,10 @@ for cls, meth, err_file in overrides:
                 r'^(\s*)((?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)'
                 r'(?:\s+static)?(?:\s+sealed)?(?:\s+extern)?(?:\s+new)?(?:\s+unsafe)?)'
                 r'(\s+(?!virtual\b|abstract\b|static\b|override\b|extern\b|partial\b))'
-                r'((?:[\w<>\[\],.?:]+?)\s+)?' + re.escape(meth) + r'\s*<*\s*\(', re.M)
+                r'((?:[\w<>\[\],.?:]+?)\s+)?(?=' + re.escape(meth) + r'\s*<*\s*(?:\(|\{|=>))', re.M)
             def _addv(m2):
                 ind, mo, rest = m2.group(1), m2.group(2).strip(), m2.group(4) or ''
-                return f"{ind}{mo} virtual {rest}{meth}("
+                return f"{ind}{mo} virtual {rest}"
             tail, cnt = pat.subn(_addv, tail, count=1)
             if cnt:
                 srcs[cur_file] = head + tail

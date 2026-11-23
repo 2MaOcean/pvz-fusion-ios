@@ -108,8 +108,9 @@ jobs:
             mkdir -p ExportedProject/ExportedProject/Assets/CoreSrc
             cp -R "$S/Core/"* ExportedProject/ExportedProject/Assets/CoreSrc/ 2>/dev/null || true
             rm -rf "$S/Core" "$S/Core.meta"
-            # SortingGroupRebuilder 反向依赖游戏代码的 ProButton（asmdef 无法引用 Assembly-CSharp），移除该类
+            # SortingGroupRebuilder / RightMenu 反向依赖游戏代码（asmdef 无法引用 Assembly-CSharp），移除
             rm -f ExportedProject/ExportedProject/Assets/CoreSrc/SortingGroupRebuilder.cs ExportedProject/ExportedProject/Assets/CoreSrc/SortingGroupRebuilder.cs.meta 2>/dev/null
+            rm -rf ExportedProject/ExportedProject/Assets/CoreSrc/RightMenu ExportedProject/ExportedProject/Assets/CoreSrc/RightMenu.meta 2>/dev/null
             echo "Core 源码已拆出到 Assets/CoreSrc ($(find ExportedProject/ExportedProject/Assets/CoreSrc -name '*.cs' | wc -l) 个 .cs)"
           fi
           for n in $KEEP_META_LIST; do
