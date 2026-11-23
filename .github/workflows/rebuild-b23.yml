@@ -339,7 +339,7 @@ jobs:
           # 全量修复反编译丢失的 virtual（一次性建索引扫描全部 override，不再依赖错误驱动）
           python3 "$GITHUB_WORKSPACE/tools/fix_virtual_all.py" "$PWD" || true
           echo "=== GeneralBuff.cs 修复后现场（诊断） ==="
-          sed -n '1,15p' ExportedProject/ExportedProject/Assets/Scripts/Assembly-CSharp/GameLevel/RogueShooting/GeneralBuff.cs 2>/dev/null || true
+          sed -n '1,15p' Assets/Scripts/Assembly-CSharp/GameLevel/RogueShooting/GeneralBuff.cs 2>/dev/null || true
           for ROUND in $(seq 1 20); do
             echo "########## 迭代 $ROUND ##########"
             rm -f "$LOG"
