@@ -111,6 +111,13 @@ jobs:
             # SortingGroupRebuilder / RightMenu 反向依赖游戏代码（asmdef 无法引用 Assembly-CSharp），移除
             rm -f ExportedProject/ExportedProject/Assets/CoreSrc/SortingGroupRebuilder.cs ExportedProject/ExportedProject/Assets/CoreSrc/SortingGroupRebuilder.cs.meta 2>/dev/null
             rm -rf ExportedProject/ExportedProject/Assets/CoreSrc/RightMenu ExportedProject/ExportedProject/Assets/CoreSrc/RightMenu.meta 2>/dev/null
+            # class Core 遮蔽 namespace Core（游戏作者命名冲突）→ 重命名类（namespace 不动）
+            if grep -rl "class Core " ExportedProject/ExportedProject/Assets/CoreSrc/ >/dev/null 2>&1; then
+              echo "发现 class Core 遮蔽命名空间，重命名为 CoreStatic"
+              grep -rl "class Core " ExportedProject/ExportedProject/Assets/CoreSrc/ 2>/dev/null | while read f; do
+                sed -i '' 's/\bclass Core /class CoreStatic /g' "$f" 2>/dev/null || sed -i 's/\bclass Core /class CoreStatic /g' "$f"
+              done
+            fi
             echo "Core 源码已拆出到 Assets/CoreSrc ($(find ExportedProject/ExportedProject/Assets/CoreSrc -name '*.cs' | wc -l) 个 .cs)"
           fi
           for n in $KEEP_META_LIST; do
