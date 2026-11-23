@@ -132,6 +132,11 @@ for cls, meth, err_file in overrides:
                 if nxt_file:
                     cur_cls, cur_file = base, nxt_file
                     continue
+            if stats['skip'] < 25:
+                # 诊断：打印跳过样本的基类里 meth 的实际声明形式
+                bsrc = get_src(cur_file)
+                lines = [l.strip() for l in bsrc.split('\n') if meth in l and 'class ' not in l][:2]
+                print(f"  [skip诊断] {cls}.{meth} → 链末 {cur_cls}（{os.path.basename(cur_file)}）声明: {lines}")
             # 追到引擎基类：生命周期方法删 override（override 声明在最初的类文件里）
             if meth in LIFECYCLE:
                 origin = None
