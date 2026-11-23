@@ -69,13 +69,32 @@ def fix_cs0426():
     return n
 
 # ---------- CS0246：类型缺失 → 工程内搜定义改引用 / stub ----------
+def fix_cs0138():
+    """'using X;' 中 X 是类型不是命名空间 → 删除该 using 行"""
+    n = 0
+    for f, ln, msg in by_code.get('CS0138', []):
+        m = re.search(r"'([\w.]+)' is a type not a namespace", msg)
+        if not m:
+            continue
+        t = m.group(1)
+        path = os.path.join(root, f)
+        if not os.path.exists(path):
+            continue
+        s = open(path, encoding='utf-8', errors='ignore').read()
+        new = re.sub(r'^\s*using\s+' + re.escape(t) + r'\s*;\s*\n', '', s, count=1, flags=re.M)
+        if new != s:
+            open(path, 'w', encoding='utf-8').write(new)
+            n += 1
+            print(f"  CS0138: {os.path.basename(f)} 删除 using {t};")
+    return n
+
 def fix_cs0246():
     n = 0
     # 提取缺失类型名
     missing_types = {}
     for f, ln, msg in by_code.get('CS0246', []):
-        m = re.search(r"The type or namespace name '(\w+)'", msg)
-        if m: missing_types.setdefault(m.group(1), set()).add(f)
+        m = re.search(r"The type or namespace name '(\w+)(<>)?'", msg)
+        if m: missing_types.setdefault((m.group(1), bool(m.group(2))), set()).add(f)
     if not missing_types: return 0
     # 工程内搜定义
     defs = {}
@@ -87,7 +106,7 @@ def fix_cs0246():
             except Exception: continue
             for cm in re.finditer(r'\b(class|struct|interface|enum)\s+(\w+)', s):
                 defs.setdefault(cm.group(2), []).append(os.path.relpath(p, root))
-    for t, ref_files in sorted(missing_types.items()):
+    for (t, generic), ref_files in sorted(missing_types.items()):
         if t in defs:
             # 定义存在：引用文件可能缺 using——跳过（复杂），仅记录
             print(f"  CS0246: {t} 定义存在于 {defs[t][:2]}（需人工检查 using）")
@@ -97,10 +116,17 @@ def fix_cs0246():
         os.makedirs(stub_dir, exist_ok=True)
         sp = os.path.join(stub_dir, f'Stub_{t}.cs')
         if not os.path.exists(sp):
-            open(sp, 'w', encoding='utf-8').write(
-                f'// 自动生成的缺失类型桩（全局命名空间）\npublic class {t} : UnityEngine.MonoBehaviour {{ }}\n')
+            if generic:
+                body = (f'// 自动生成的缺失泛型单例桩\n'
+                        f'public class {t}<T> : UnityEngine.MonoBehaviour where T : class {{\n'
+                        f'    public static T Instance {{ get; set; }}\n'
+                        f'    public virtual void OnEnableImpl() {{ }}\n}}\n')
+                open(sp, 'w', encoding='utf-8').write(body)
+            else:
+                open(sp, 'w', encoding='utf-8').write(
+                    f'// 自动生成的缺失类型桩（全局命名空间）\npublic class {t} : UnityEngine.MonoBehaviour {{ }}\n')
             n += 1
-            print(f"  CS0246 stub: {t}")
+            print(f"  CS0246 stub: {t}{'<T>' if generic else ''}")
     return n
 
 # ---------- 执行 ----------
@@ -228,6 +254,7 @@ if 'CS0104' in by_code: stats.append(('CS0104', fix_cs0104()))
 if 'CS0426' in by_code: stats.append(('CS0426', fix_cs0426()))
 if 'CS0246' in by_code: stats.append(('CS0246', fix_cs0246()))
 if 'CS0115' in by_code: stats.append(('CS0115', fix_cs0115()))
+if 'CS0138' in by_code: stats.append(('CS0138', fix_cs0138()))
 
 print(f"修复文件数: {len(fixed_files)}")
 for code, n in stats:
