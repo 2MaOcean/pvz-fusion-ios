@@ -101,7 +101,15 @@ jobs:
             [ -f "$P/$n" ] && cp "$f" "$P/$n" && echo "replaced $n"
           done
           # 2) 预删将被真实包/第三方编译替代的 dummy DLL（保留 .meta 供 GUID 复用）
-          KEEP_META_LIST="Unity.RenderPipelines.Core.Runtime Unity.RenderPipelines.Universal.Runtime Unity.2D.Animation.Runtime Unity.2D.Common.Runtime Unity.2D.SpriteShape.Runtime Unity.2D.Tilemap.Extras Unity.TextMeshPro Unity.Collections Unity.Burst Unity.Burst.Unsafe Unity.Collections.LowLevel.ILSupport Unity.Mathematics Unity.VisualScripting.Core spine-csharp spine-unity UniTask SimpleFileBrowser.Runtime UnityEngine.UI"
+          KEEP_META_LIST="Unity.RenderPipelines.Core.Runtime Unity.RenderPipelines.Universal.Runtime Unity.2D.Animation.Runtime Unity.2D.Common.Runtime Unity.2D.SpriteShape.Runtime Unity.2D.Tilemap.Extras Unity.TextMeshPro Unity.Collections Unity.Burst Unity.Burst.Unsafe Unity.Collections.LowLevel.ILSupport Unity.Mathematics Unity.VisualScripting.Core spine-csharp spine-unity UniTask SimpleFileBrowser.Runtime UnityEngine.UI Core"
+          # Core 源码从 Assembly-CSharp 拆出（单独编译成真实 Core.dll，走两遍法拷回）
+          S=ExportedProject/ExportedProject/Assets/Scripts/Assembly-CSharp
+          if [ -d "$S/Core" ]; then
+            mkdir -p ExportedProject/ExportedProject/Assets/CoreSrc
+            cp -R "$S/Core/"* ExportedProject/ExportedProject/Assets/CoreSrc/ 2>/dev/null || true
+            rm -rf "$S/Core" "$S/Core.meta"
+            echo "Core 源码已拆出到 Assets/CoreSrc ($(find ExportedProject/ExportedProject/Assets/CoreSrc -name '*.cs' | wc -l) 个 .cs)"
+          fi
           for n in $KEEP_META_LIST; do
             rm -f "$P/$n.dll" && echo "pre-deleted $n.dll (meta kept)"
           done
@@ -206,6 +214,10 @@ jobs:
           cat > "$A/sfb/SimpleFileBrowser.Runtime.asmdef" <<'EOF'
           { "name": "SimpleFileBrowser.Runtime", "autoReferenced": true, "references": ["Unity.TextMeshPro"] }
           EOF
+          # Core 源码的 asmdef（编译产物名与 Plugins/Core.dll 同名）
+          cat > ExportedProject/ExportedProject/Assets/CoreSrc/Core.asmdef <<'EOF'
+          { "name": "Core", "autoReferenced": true, "allowUnsafeCode": true }
+          EOF
           echo "=== ThirdParty 结构 ==="
           find "$A" -maxdepth 2 -type d | head -15
 
@@ -236,7 +248,7 @@ jobs:
                   "Unity.VisualScripting.Core.dll",
                   "spine-unity.dll",
                   "UniTask.dll", "SimpleFileBrowser.Runtime.dll",
-                  "UnityEngine.UI.dll"
+                  "UnityEngine.UI.dll", "Core.dll"
               };
               static readonly string[] PackagesToRemove = {
                   "com.unity.render-pipelines.universal",
@@ -262,6 +274,9 @@ jobs:
                       // 删第三方源码目录
                       if (Directory.Exists("Assets/ThirdParty")) Directory.Delete("Assets/ThirdParty", true);
                       if (File.Exists("Assets/ThirdParty.meta")) File.Delete("Assets/ThirdParty.meta");
+                      // 删 Core 源码目录（已编译成真实 Core.dll 拷回 Plugins）
+                      if (Directory.Exists("Assets/CoreSrc")) Directory.Delete("Assets/CoreSrc", true);
+                      if (File.Exists("Assets/CoreSrc.meta")) File.Delete("Assets/CoreSrc.meta");
                       // 移除包（防同名冲突；2022.3 的 Client.Remove 只接受单包名）
                       foreach (var pkg in PackagesToRemove) {
                           try {
