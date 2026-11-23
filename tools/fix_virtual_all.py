@@ -1,24 +1,14 @@
 #!/usr/bin/env python3
-# fix_virtual_all.py — 全量修复反编译源码丢失的 virtual（一次性，不依赖错误驱动）
+# fix_virtual_all.py v2 — 全工程基类全虚化（一次到位，不依赖错误驱动）
+# 策略：所有类的实例方法加 virtual（virtual 不改变运行行为）；
+#       override 声明沿链向上：根基类有同名方法→已覆盖合法；
+#       追到继承链顶（无同名方法/引擎）→ 删除 override（接口实现/引擎魔法方法错加）。
 # 用法: python3 fix_virtual_all.py <工程根目录>
 import re, os, sys
 
 root = sys.argv[1] if len(sys.argv) > 1 else '.'
 
-LIFECYCLE = {
-    'Awake', 'Start', 'Update', 'FixedUpdate', 'LateUpdate', 'OnEnable', 'OnDisable',
-    'OnDestroy', 'OnApplicationPause', 'OnApplicationQuit', 'OnGUI', 'OnDrawGizmos',
-    'OnDrawGizmosSelected', 'OnValidate', 'Reset', 'OnApplicationFocus',
-    'OnTriggerEnter', 'OnTriggerExit', 'OnTriggerStay',
-    'OnCollisionEnter', 'OnCollisionExit', 'OnCollisionStay',
-}
-
-# ---------- 1. 扫描全部 .cs：class→(file, base)，文件内容缓存 ----------
-files = []          # 所有 .cs 路径
-srcs = {}           # path → 内容（懒加载缓存）
-class_def = {}      # 类名 → 文件路径
-class_base = {}     # 类名 → 基类名
-
+files = []
 for d in [os.path.join(root, 'Assets', 'Scripts'), os.path.join(root, 'Assets', 'CoreSrc')]:
     if not os.path.isdir(d):
         continue
@@ -29,6 +19,7 @@ for d in [os.path.join(root, 'Assets', 'Scripts'), os.path.join(root, 'Assets', 
 
 print(f"扫描 {len(files)} 个 .cs ...")
 
+srcs = {}
 def get_src(p):
     if p not in srcs:
         try:
@@ -37,11 +28,14 @@ def get_src(p):
             srcs[p] = ''
     return srcs[p]
 
+# ---------- 1. 类索引：class → (file, base) ----------
+class_def = {}
+class_base = {}
 for p in files:
     src = get_src(p)
     if not src:
         continue
-    for m in re.finditer(r'\bclass\s+([A-Za-z_]\w*)(?:<[^>]*>)?\s*(?::\s*([^\{{]+))?', src):
+    for m in re.finditer(r'\bclass\s+([A-Za-z_]\w*)(?:<[^>]*>)?\s*(?::\s*([^\{{\n]+))?', src):
         cn = m.group(1)
         if cn not in class_def:
             class_def[cn] = p
@@ -53,41 +47,55 @@ for p in files:
 
 print(f"索引到 {len(class_def)} 个类")
 
-# 方法声明模式（捕获修饰与 virtual/override 状态）
-DECL_PAT = re.compile(
+# 引擎/系统基类集合（不可修改）
+ENGINE_BASES = {'MonoBehaviour', 'ScriptableObject', 'object', 'Object', 'Component',
+                'Behaviour', 'AnimatorStateBehaviour', 'StateBehaviour'}
+
+# ---------- 2. 第一遍：所有实例方法加 virtual（跳过已有修饰、构造、static）----------
+# 方法声明：修饰符 + 可选 new/virtual/override/... + 返回类型 + 名字 + (
+# 排除：static、已有 virtual/override/abstract、构造（名字=类名）、析构
+METHOD_PAT = re.compile(
     r'^(\s*)((?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)'
-    r'(?:\s+static)?(?:\s+sealed)?(?:\s+extern)?(?:\s+new)?(?:\s+unsafe)?)'
-    r'(\s+(virtual|override|abstract|static|new|extern|unsafe)\s*|\s+)'
-    r'((?:[\w<>\[\],.?:]+?)\s+)?' + r'({meth})' + r'\s*<*\s*\(',
+    r'(?:(?:\s+static)|(?:\s+sealed)|(?:\s+extern)|(?:\s+new)|(?:\s+unsafe)|(?:\s+virtual)|(?:\s+override)|(?:\s+abstract))*)'
+    r'(\s+)([A-Za-z_][\w<>\[\],.?:\s]*?)\s+([A-Za-z_]\w*)\s*<*\s*(?=\(|\{|=>|;)',
     re.M)
 
-def method_kind(src, cls, meth):
-    """返回 (kind, match) — kind: none/virtual/override/abstract/normal"""
-    # 找类定义区间（简化：整个文件搜，多类文件可能误中——取类声明后的第一个匹配）
-    ci = src.find('class ' + cls)
-    if ci < 0:
-        return 'none', None
-    region = src[ci:]
-    mm = DECL_PAT.replace('{meth}', re.escape(meth)).search(region) if False else re.search(
-        r'^(\s*)((?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)'
-        r'(?:\s+static)?(?:\s+sealed)?(?:\s+extern)?(?:\s+new)?(?:\s+unsafe)?)'
-        r'(\s+(virtual|override|abstract|static|new|extern|unsafe)\s*|\s+)'
-        r'((?:[\w<>\[\],.?:]+?)\s+)?' + re.escape(meth) + r'\s*<*\s*(?:\(|\{|=>)',
-        region, re.M)
-    if not mm:
-        return 'none', None
-    kw = mm.group(3) or ''
-    if 'virtual' in kw:
-        return 'virtual', mm
-    if 'override' in kw:
-        return 'override', mm
-    if 'abstract' in kw:
-        return 'abstract', mm
-    if 'static' in kw:
-        return 'static', mm
-    return 'normal', mm
+n_virtual_added = 0
+for p in files:
+    src = get_src(p)
+    if 'class' not in src:
+        continue
+    lines = src.split('\n')
+    cur_cls = None
+    changed = False
+    for i, line in enumerate(lines):
+        cm = re.search(r'\bclass\s+([A-Za-z_]\w*)', line)
+        if cm:
+            cur_cls = cm.group(1)
+        # 构造函数（名字 == 类名）跳过
+        cm2 = METHOD_PAT.search(line)
+        if not cm2:
+            continue
+        mods_full = cm2.group(2)
+        meth = cm2.group(5)
+        if meth == cur_cls:
+            continue  # 构造
+        if re.search(r'\b(static|virtual|override|abstract|const|event)\b', mods_full):
+            continue  # 已有修饰，不动
+        if 'get;' in line or 'set;' in line or '=>' in line and '{' not in line.split('=>')[0]:
+            pass  # 属性也虚化（允许）
+        lines[i] = re.sub(
+            r'(\b(?:public|protected|internal|private)\b)',
+            r'\1 virtual', line, count=1)
+        changed = True
+        n_virtual_added += 1
+    if changed:
+        srcs[p] = '\n'.join(lines)
+        open(p, 'w', encoding='utf-8').write(srcs[p])
 
-# ---------- 2. 收集全部 override 方法（行级状态机：记录最近 class 声明）----------
+print(f"第一遍: 加 virtual {n_virtual_added} 个方法")
+
+# ---------- 3. 第二遍：处理 override 声明（沿链向上；顶无同名 → 删 override）----------
 overrides = []  # (cls, meth, file)
 seen = set()
 for p in files:
@@ -107,102 +115,60 @@ for p in files:
                 seen.add(key)
                 overrides.append((cur_cls, om.group(1), p))
 
-print(f"发现 {len(overrides)} 个 override 方法")
+print(f"发现 {len(overrides)} 个 override 声明")
 
-# ---------- 3. 逐个沿链修复 ----------
-stats = {'root_virtual': 0, 'del_override': 0, 'already': 0, 'skip': 0, 'nofile': 0}
+def has_member_upstream(start_cls, meth, max_depth=10):
+    """沿继承链向上找同名成员（virtual/普通/abstract 都算）；返回 True 找到"""
+    cur = class_base.get(start_cls)
+    cls = start_cls
+    depth = 0
+    while cls and depth < max_depth:
+        base = class_base.get(cls)
+        if not base:
+            return False
+        if base in ENGINE_BASES:
+            return False
+        bfile = class_def.get(base)
+        if not bfile:
+            return False
+        bsrc = get_src(bfile)
+        # 基类里有没有同名成员（方法或属性）
+        if re.search(r'\b' + re.escape(meth) + r'\s*(?:\(|\{|=>)', bsrc):
+            return True
+        cls = base
+        depth += 1
+    return False
+
+stats = {'keep': 0, 'del': 0, 'nofile': 0}
 written = set()
-
-def flush(p):
-    if p in written:
-        open(p, 'w', encoding='utf-8').write(srcs[p])
-
-for cls, meth, err_file in overrides:
-    cur_cls, cur_file = cls, class_def.get(cls, err_file)
-    chain = 0
-    while chain < 10:
-        chain += 1
-        src = get_src(cur_file)
-        kind, mm = method_kind(src, cur_cls, meth)
-        if kind == 'none':
-            # 中间层无此方法声明 → 继续向基类找
-            base = class_base.get(cur_cls)
-            if base and base != cur_cls and base not in ('MonoBehaviour', 'ScriptableObject', 'object', 'Object') and chain < 10:
-                nxt_file = class_def.get(base)
-                if nxt_file:
-                    cur_cls, cur_file = base, nxt_file
-                    continue
-            if stats['skip'] < 25:
-                # 诊断：打印跳过样本的基类里 meth 的实际声明形式
-                bsrc = get_src(cur_file)
-                lines = [l.strip() for l in bsrc.split('\n') if meth in l and 'class ' not in l][:2]
-                print(f"  [skip诊断] {cls}.{meth} → 链末 {cur_cls}（{os.path.basename(cur_file)}）声明: {lines}")
-            # 追到引擎基类：生命周期方法删 override（override 声明在最初的类文件里）
-            if meth in LIFECYCLE:
-                origin = None
-                for c2, m2, f2 in overrides:
-                    if c2 == cls and m2 == meth:
-                        origin = f2
-                        break
-                if origin:
-                    osrc = get_src(origin)
-                    pat2 = re.compile(
-                        r'(\b(?:public|protected|internal|private)\s+)override(\s+(?:[\w<>\[\],.?:]+?)\s+)'
-                        + re.escape(meth) + r'\s*<*\s*\(')
-                    src2, cnt = pat2.subn(r'\1\2' + meth + '(', osrc, count=1)
-                    if cnt:
-                        srcs[origin] = src2
-                        written.add(origin)
-                        stats['del_override'] += 1
-                        break
-            stats['skip'] += 1
-            break
-        if kind == 'virtual' or kind == 'abstract':
-            stats['already'] += 1
-            break
-        if kind == 'normal':
-            # 加 virtual
-            reg = src.find('class ' + cur_cls)
-            head, tail = src[:reg], src[reg:]
-            pat = re.compile(
-                r'^(\s*)((?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)'
-                r'(?:\s+static)?(?:\s+sealed)?(?:\s+extern)?(?:\s+new)?(?:\s+unsafe)?)'
-                r'(\s+(?!virtual\b|abstract\b|static\b|override\b|extern\b|partial\b))'
-                r'((?:[\w<>\[\],.?:]+?)\s+)?(?=' + re.escape(meth) + r'\s*<*\s*(?:\(|\{|=>))', re.M)
-            def _addv(m2):
-                ind, mo, rest = m2.group(1), m2.group(2).strip(), m2.group(4) or ''
-                return f"{ind}{mo} virtual {rest}"
-            tail, cnt = pat.subn(_addv, tail, count=1)
-            if cnt:
-                srcs[cur_file] = head + tail
-                written.add(cur_file)
-                stats['root_virtual'] += 1
-            break
-        if kind == 'override':
-            base = class_base.get(cur_cls)
-            if not base or base in ('MonoBehaviour', 'ScriptableObject', 'object', 'Object', cur_cls):
-                # 追到引擎：仅生命周期方法删 override
-                if meth in LIFECYCLE:
-                    pat2 = re.compile(
-                        r'(\b(?:public|protected|internal|private)\s+)override(\s+(?:[\w<>\[\],.?:]+?)\s+)'
-                        + re.escape(meth) + r'\s*<*\s*\(')
-                    src2, cnt = pat2.subn(r'\1\2' + meth + '(', src, count=1)
-                    if cnt:
-                        srcs[cur_file] = src2
-                        written.add(cur_file)
-                        stats['del_override'] += 1
-                else:
-                    stats['skip'] += 1
-                break
-            nxt_file = class_def.get(base)
-            if not nxt_file:
-                stats['nofile'] += 1
-                break
-            cur_cls, cur_file = base, nxt_file
-            continue
+for cls, meth, p in overrides:
+    # 基类链上有同名成员 → override 合法（保留）
+    if has_member_upstream(cls, meth):
+        stats['keep'] += 1
+        continue
+    # 链上没有 → 反编译错加的 override → 删除关键字
+    src = get_src(p)
+    cur_cls = None
+    new_lines = []
+    changed = False
+    for line in src.split('\n'):
+        cm = re.search(r'\bclass\s+([A-Za-z_]\w*)', line)
+        if cm:
+            cur_cls = cm.group(1)
+        if cur_cls == cls and re.search(r'\boverride\s+', line) and re.search(
+                r'\boverride\s+(?:[\w<>\[\],.?:]+?)\s+' + re.escape(meth) + r'\b', line):
+            line = re.sub(r'\boverride\s+', '', line, count=1)
+            changed = True
+            stats['del'] += 1
+        new_lines.append(line)
+    if changed:
+        srcs[p] = '\n'.join(new_lines)
+        written.add(p)
+    else:
+        stats['nofile'] += 1
 
 for p in written:
-    flush(p)
+    open(p, 'w', encoding='utf-8').write(srcs[p])
 
-print(f"完成: 根基类加 virtual={stats['root_virtual']}, 删生命周期 override={stats['del_override']}, "
-      f"已是virtual={stats['already']}, 跳过={stats['skip']}, 基类文件缺失={stats['nofile']}, 写文件={len(written)}")
+print(f"完成: 保留合法 override={stats['keep']}, 删除错加 override={stats['del']}, "
+      f"无文件匹配={stats['nofile']}, 写文件={len(written)}")
