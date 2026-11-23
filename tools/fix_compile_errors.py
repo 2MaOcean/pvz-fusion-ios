@@ -105,24 +105,36 @@ def fix_cs0246():
 
 # ---------- 执行 ----------
 # ---------- CS0115：基类方法缺 virtual（il2cpp 元数据无 virtual 信息，反编译丢失）----------
-def _find_class_file(cls, extra_dirs):
-    """全工程找 class <cls> 的定义文件"""
-    cands = []
-    for d in [os.path.join(root, 'Assets', 'Scripts'), os.path.join(root, 'Assets', 'CoreSrc')] + extra_dirs:
+CLASS_INDEX = None
+def _class_index():
+    """一次性扫描全部 .cs，按内容建 类名→文件列表 索引（文件名与类名可能不一致）"""
+    global CLASS_INDEX
+    if CLASS_INDEX is not None:
+        return CLASS_INDEX
+    idx = {}
+    for d in [os.path.join(root, 'Assets', 'Scripts'), os.path.join(root, 'Assets', 'CoreSrc')]:
         if not os.path.isdir(d):
             continue
         for dp, _, fns in os.walk(d):
             for fn in fns:
-                if fn == cls + '.cs':
-                    cands.append(os.path.join(dp, fn))
-    for c in cands:
-        try:
-            src = open(c, encoding='utf-8', errors='ignore').read()
-        except Exception:
-            continue
-        if re.search(r'\b(class|struct|interface)\s+' + re.escape(cls) + r'\b', src):
-            return c
-    return None
+                if not fn.endswith('.cs'):
+                    continue
+                p = os.path.join(dp, fn)
+                try:
+                    src = open(p, encoding='utf-8', errors='ignore').read()
+                except Exception:
+                    continue
+                if len(src) > 400000:
+                    src = src[:400000]
+                for m in re.finditer(r'\b(?:class|struct|interface)\s+([A-Za-z_]\w*)', src):
+                    idx.setdefault(m.group(1), []).append(p)
+    CLASS_INDEX = idx
+    return idx
+
+def _find_class_file(cls, extra_dirs):
+    idx = _class_index()
+    lst = idx.get(cls) or []
+    return lst[0] if lst else None
 
 def fix_cs0115():
     """错误形如 'X.M(args)': no suitable method found to override
