@@ -262,13 +262,15 @@ jobs:
                       // 删第三方源码目录
                       if (Directory.Exists("Assets/ThirdParty")) Directory.Delete("Assets/ThirdParty", true);
                       if (File.Exists("Assets/ThirdParty.meta")) File.Delete("Assets/ThirdParty.meta");
-                      // 移除包（防同名冲突）
-                      try {
-                          var req = Client.Remove(PackagesToRemove);
-                          var sw = System.Diagnostics.Stopwatch.StartNew();
-                          while (!req.IsCompleted && sw.Elapsed.TotalSeconds < 300) System.Threading.Thread.Sleep(200);
-                          Debug.Log("[CI] Remove status: " + req.Status + " elapsed=" + sw.Elapsed.TotalSeconds + "s");
-                      } catch (System.Exception e) { Debug.LogWarning("[CI] Remove err: " + e.Message); }
+                      // 移除包（防同名冲突；2022.3 的 Client.Remove 只接受单包名）
+                      foreach (var pkg in PackagesToRemove) {
+                          try {
+                              var req = Client.Remove(pkg);
+                              var sw = System.Diagnostics.Stopwatch.StartNew();
+                              while (!req.IsCompleted && sw.Elapsed.TotalSeconds < 120) System.Threading.Thread.Sleep(200);
+                              Debug.Log("[CI] Remove " + pkg + ": " + req.Status + " (" + sw.Elapsed.TotalSeconds + "s)");
+                          } catch (System.Exception e) { Debug.LogWarning("[CI] Remove " + pkg + " err: " + e.Message); }
+                      }
                       AssetDatabase.Refresh();
                       while (EditorApplication.isCompiling) System.Threading.Thread.Sleep(300);
                       // 真实 DLL 拷入 Plugins（meta 保留在位）
