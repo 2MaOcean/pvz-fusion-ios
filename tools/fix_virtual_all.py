@@ -57,7 +57,7 @@ ENGINE_BASES = {'MonoBehaviour', 'ScriptableObject', 'object', 'Object', 'Compon
 METHOD_PAT = re.compile(
     r'^(\s*)((?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)'
     r'(?:(?:\s+static)|(?:\s+sealed)|(?:\s+extern)|(?:\s+new)|(?:\s+unsafe)|(?:\s+virtual)|(?:\s+override)|(?:\s+abstract))*)'
-    r'(\s+)([A-Za-z_][\w<>\[\],.?:\s]*?)\s+([A-Za-z_]\w*)\s*<*\s*(?=\(|\{|=>|;)',
+    r'(\s+)([A-Za-z_][\w<>\[\],.?:\s]*?)\s+([A-Za-z_]\w*)\s*<*\s*(?=\(|\{|=>)',
     re.M)
 
 n_virtual_added = 0
@@ -87,6 +87,8 @@ for p in files:
             continue  # 已有修饰，不动
         if re.search(r'\bprivate\b', mods_full):
             continue  # private 不能 virtual
+        if '=>' in line:
+            continue  # 表达式成员保守跳过
         lines[i] = re.sub(
             r'(\b(?:public|protected|internal)\b)',
             r'\1 virtual', line, count=1)
