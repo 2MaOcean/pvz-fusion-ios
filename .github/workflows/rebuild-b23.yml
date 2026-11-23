@@ -249,6 +249,19 @@ jobs:
                   "com.unity.visualscripting"
               };
               public static void PrepareAndBuild() {
+                  // 2d.animation 8.0.1 的 Editor（皮肤编辑器）依赖矩阵与独立工程不兼容，运行时不需要——删 Editor asmdef 不编译
+                  try {
+                      foreach (var pkgDir in Directory.GetDirectories("Library/PackageCache", "com.unity.2d.animation@*")) {
+                          string[] edDirs = { Path.Combine(pkgDir, "Editor"), Path.Combine(pkgDir, "IK", "Editor"), Path.Combine(pkgDir, "Tests", "Editor") };
+                          foreach (var ed in edDirs) {
+                              if (Directory.Exists(ed))
+                                  foreach (var f in Directory.GetFiles(ed, "*.asmdef")) {
+                                      File.Delete(f); var m = f + ".meta"; if (File.Exists(m)) File.Delete(m);
+                                      Debug.Log("[CI] removed editor asmdef: " + f);
+                                  }
+                          }
+                      }
+                  } catch (System.Exception e) { Debug.LogWarning("[CI] editor-asmdef removal err: " + e.Message); }
                   var saDir = "Library/ScriptAssemblies";
                   var tmp = "/tmp/pkgdll";
                   // 迭代轮次幂等：包已移除时跳过
