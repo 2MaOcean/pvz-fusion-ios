@@ -328,6 +328,8 @@ jobs:
           UNI="$UNITY_EXE"
           LOG="$PWD/unity_build.log"
           SUCCESS=0
+          # 全量修复反编译丢失的 virtual（一次性建索引扫描全部 override，不再依赖错误驱动）
+          python3 "$GITHUB_WORKSPACE/tools/fix_virtual_all.py" "$PWD" || true
           for ROUND in $(seq 1 20); do
             echo "########## 迭代 $ROUND ##########"
             rm -f "$LOG"
