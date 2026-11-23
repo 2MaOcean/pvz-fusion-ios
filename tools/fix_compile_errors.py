@@ -130,6 +130,7 @@ def fix_cs0115():
     n = 0
     done_files = {}
     seen = set()
+    seen_debug = {}
     for f, ln, msg in by_code.get('CS0115', []):
         m = re.match(r"'([\w.]+)\.([\w<>]+)[^']*': no suitable method found to override", msg)
         if not m:
@@ -144,17 +145,23 @@ def fix_cs0115():
         base_cls = None
         try:
             src = open(err_file, encoding='utf-8', errors='ignore').read()
-        except Exception:
+        except Exception as e:
+            print(f"  CS0115 debug: 读错误文件失败 {err_file}: {e}")
             continue
         cm = re.search(r'\bclass\s+' + re.escape(cls) + r'\b[^{]*:\s*([A-Za-z_][\w.]*)', src)
         if cm:
             base_cls = cm.group(1).split('.')[-1]
         else:
-            base_cls = cls  # 类与错误同文件（无显式基类声明匹配时，尝试本文件）
+            print(f"  CS0115 debug: {cls} 在 {f} 中未匹配到基类声明（文件存在={os.path.exists(err_file)}，含class={'class' in src}）")
+            base_cls = cls
         if not base_cls or base_cls in ('MonoBehaviour', 'ScriptableObject', 'object', 'Object'):
+            print(f"  CS0115 debug: {cls} 基类={base_cls} 跳过（引擎基类）")
             continue
         base_file = _find_class_file(base_cls, [os.path.dirname(err_file)])
         if not base_file:
+            if cls == base_cls or seen_debug.get(base_cls) is None:
+                seen_debug[base_cls] = 1
+                print(f"  CS0115 debug: 基类 {base_cls} 的文件未找到（搜 Assets/Scripts + Assets/CoreSrc）")
             continue
         if base_file not in done_files:
             try:
