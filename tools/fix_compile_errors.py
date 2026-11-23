@@ -104,9 +104,62 @@ def fix_cs0246():
     return n
 
 # ---------- 执行 ----------
+# ---------- CS0115：基类方法缺 virtual（il2cpp 元数据无 virtual 信息，反编译丢失）----------
+def fix_cs0115():
+    """错误形如 'X.M(args)': no suitable method found to override
+    → 在定义 X 的源文件里找到方法 M 的声明，把非 virtual 的实例方法改成 virtual。
+    继承链可能多级，靠迭代循环逐轮收敛。"""
+    n = 0
+    seen = set()  # (class_name, method_name) 去重
+    for f, ln, msg in by_code.get('CS0115', []):
+        m = re.match(r"'([\w.]+)\.([\w<>]+)[^']*': no suitable method found to override", msg)
+        if not m:
+            continue
+        cls, meth = m.group(1).split('.')[-1], m.group(2)
+        key = (cls, meth)
+        if key in seen:
+            continue
+        seen.add(key)
+        # 定位类文件：类名与文件名一致优先，否则全工程搜 class 声明
+        cands = []
+        exact = os.path.join(root, os.path.dirname(f), cls + '.cs')
+        if os.path.exists(exact):
+            cands = [exact]
+        else:
+            for dp, _, fns in os.walk(os.path.join(root, 'Assets', 'Scripts')):
+                for fn in fns:
+                    if fn == cls + '.cs':
+                        cands.append(os.path.join(dp, fn))
+        target_file = None
+        for c in cands:
+            src = open(c, encoding='utf-8', errors='ignore').read()
+            if re.search(r'\b(class|struct|interface)\s+' + re.escape(cls) + r'\b', src):
+                target_file = c
+                break
+        if not target_file:
+            continue
+        src = open(target_file, encoding='utf-8', errors='ignore').read()
+        # 方法声明行：允许各种修饰组合，跳过已是 virtual/abstract/static/override 的
+        pat = re.compile(
+            r'^(\s*)((?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)(?:\s+static)?'
+            r'(?:\s+sealed)?(?:\s+extern)?(?:\s+new)?(?:\s+unsafe)?)'
+            r'(\s+(?!virtual\b|abstract\b|static\b|override\b|extern\b))'
+            r'((?:[\w<>\[\],.?:\s]+?)\s+)?' + re.escape(meth) + r'\s*\(',
+            re.M)
+        def add_virtual(mm):
+            indent, mods, gap, rest = mm.group(1), mm.group(2).strip(), mm.group(3), mm.group(4) or ''
+            return f"{indent}{mods} virtual {rest}{meth}(" if rest else f"{indent}{mods} virtual {meth}("
+        new_src, cnt = pat.subn(add_virtual, src, count=1)
+        if cnt:
+            open(target_file, 'w', encoding='utf-8').write(new_src)
+            n += 1
+            print(f"  CS0115: {os.path.basename(target_file)}.{meth} → virtual")
+    return n
+
 if 'CS0104' in by_code: stats.append(('CS0104', fix_cs0104()))
 if 'CS0426' in by_code: stats.append(('CS0426', fix_cs0426()))
 if 'CS0246' in by_code: stats.append(('CS0246', fix_cs0246()))
+if 'CS0115' in by_code: stats.append(('CS0115', fix_cs0115()))
 
 print(f"修复文件数: {len(fixed_files)}")
 for code, n in stats:
