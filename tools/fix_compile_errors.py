@@ -105,12 +105,31 @@ def fix_cs0246():
 
 # ---------- 执行 ----------
 # ---------- CS0115：基类方法缺 virtual（il2cpp 元数据无 virtual 信息，反编译丢失）----------
+def _find_class_file(cls, extra_dirs):
+    """全工程找 class <cls> 的定义文件"""
+    cands = []
+    for d in [os.path.join(root, 'Assets', 'Scripts'), os.path.join(root, 'Assets', 'CoreSrc')] + extra_dirs:
+        if not os.path.isdir(d):
+            continue
+        for dp, _, fns in os.walk(d):
+            for fn in fns:
+                if fn == cls + '.cs':
+                    cands.append(os.path.join(dp, fn))
+    for c in cands:
+        try:
+            src = open(c, encoding='utf-8', errors='ignore').read()
+        except Exception:
+            continue
+        if re.search(r'\b(class|struct|interface)\s+' + re.escape(cls) + r'\b', src):
+            return c
+    return None
+
 def fix_cs0115():
     """错误形如 'X.M(args)': no suitable method found to override
-    → 在定义 X 的源文件里找到方法 M 的声明，把非 virtual 的实例方法改成 virtual。
-    继承链可能多级，靠迭代循环逐轮收敛。"""
+    → 从 X 的类声明提取基类名，在基类文件里给方法 M 加 virtual（继承链靠迭代收敛）。"""
     n = 0
-    seen = set()  # (class_name, method_name) 去重
+    done_files = {}
+    seen = set()
     for f, ln, msg in by_code.get('CS0115', []):
         m = re.match(r"'([\w.]+)\.([\w<>]+)[^']*': no suitable method found to override", msg)
         if not m:
@@ -120,40 +139,44 @@ def fix_cs0115():
         if key in seen:
             continue
         seen.add(key)
-        # 定位类文件：类名与文件名一致优先，否则全工程搜 class 声明
-        cands = []
-        exact = os.path.join(root, os.path.dirname(f), cls + '.cs')
-        if os.path.exists(exact):
-            cands = [exact]
-        else:
-            for dp, _, fns in os.walk(os.path.join(root, 'Assets', 'Scripts')):
-                for fn in fns:
-                    if fn == cls + '.cs':
-                        cands.append(os.path.join(dp, fn))
-        target_file = None
-        for c in cands:
-            src = open(c, encoding='utf-8', errors='ignore').read()
-            if re.search(r'\b(class|struct|interface)\s+' + re.escape(cls) + r'\b', src):
-                target_file = c
-                break
-        if not target_file:
+        # 错误文件 → 类声明 → 基类名
+        err_file = os.path.join(root, f)
+        base_cls = None
+        try:
+            src = open(err_file, encoding='utf-8', errors='ignore').read()
+        except Exception:
             continue
-        src = open(target_file, encoding='utf-8', errors='ignore').read()
-        # 方法声明行：允许各种修饰组合，跳过已是 virtual/abstract/static/override 的
+        cm = re.search(r'\bclass\s+' + re.escape(cls) + r'\b[^{]*:\s*([A-Za-z_][\w.]*)', src)
+        if cm:
+            base_cls = cm.group(1).split('.')[-1]
+        else:
+            base_cls = cls  # 类与错误同文件（无显式基类声明匹配时，尝试本文件）
+        if not base_cls or base_cls in ('MonoBehaviour', 'ScriptableObject', 'object', 'Object'):
+            continue
+        base_file = _find_class_file(base_cls, [os.path.dirname(err_file)])
+        if not base_file:
+            continue
+        if base_file not in done_files:
+            try:
+                done_files[base_file] = open(base_file, encoding='utf-8', errors='ignore').read()
+            except Exception:
+                continue
+        src = done_files[base_file]
         pat = re.compile(
-            r'^(\s*)((?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)(?:\s+static)?'
-            r'(?:\s+sealed)?(?:\s+extern)?(?:\s+new)?(?:\s+unsafe)?)'
-            r'(\s+(?!virtual\b|abstract\b|static\b|override\b|extern\b))'
-            r'((?:[\w<>\[\],.?:\s]+?)\s+)?' + re.escape(meth) + r'\s*\(',
+            r'^(\s*)((?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)'
+            r'(?:\s+static)?(?:\s+sealed)?(?:\s+extern)?(?:\s+new)?(?:\s+unsafe)?)'
+            r'(\s+(?!virtual\b|abstract\b|static\b|override\b|extern\b|partial\b))'
+            r'((?:[\w<>\[\],.?:\s]+?)\s+)?' + re.escape(meth) + r'\s*<*\s*\(',
             re.M)
         def add_virtual(mm):
-            indent, mods, gap, rest = mm.group(1), mm.group(2).strip(), mm.group(3), mm.group(4) or ''
-            return f"{indent}{mods} virtual {rest}{meth}(" if rest else f"{indent}{mods} virtual {meth}("
+            indent, mods, rest = mm.group(1), mm.group(2).strip(), mm.group(4) or ''
+            return f"{indent}{mods} virtual {rest}{meth}<*(" if False else f"{indent}{mods} virtual {rest}{meth}("
         new_src, cnt = pat.subn(add_virtual, src, count=1)
         if cnt:
-            open(target_file, 'w', encoding='utf-8').write(new_src)
+            done_files[base_file] = new_src
+            open(base_file, 'w', encoding='utf-8').write(new_src)
             n += 1
-            print(f"  CS0115: {os.path.basename(target_file)}.{meth} → virtual")
+            print(f"  CS0115: {os.path.basename(base_file)}({base_cls}).{meth} → virtual")
     return n
 
 if 'CS0104' in by_code: stats.append(('CS0104', fix_cs0104()))
