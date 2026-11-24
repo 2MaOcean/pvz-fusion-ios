@@ -353,6 +353,11 @@ jobs:
           SUCCESS=0
           # 全量修复反编译丢失的 virtual（一次性建索引扫描全部 override，不再依赖错误驱动）
           python3 "$GITHUB_WORKSPACE/tools/fix_virtual_all.py" "$PWD" || true
+          # 修复历史损坏行（virtual 误替换了 override int）
+          sed -i '' 's/public virtual MaxCount => 0;/public override int MaxCount => 0;/' \
+            Assets/Scripts/Assembly-CSharp/GameLevel/RogueShooting/GeneralBuff.cs 2>/dev/null || \
+            sed -i 's/public virtual MaxCount => 0;/public override int MaxCount => 0;/' \
+            Assets/Scripts/Assembly-CSharp/GameLevel/RogueShooting/GeneralBuff.cs 2>/dev/null || true
           echo "=== GeneralBuff.cs 修复后现场（诊断） ==="
           sed -n '1,15p' Assets/Scripts/Assembly-CSharp/GameLevel/RogueShooting/GeneralBuff.cs 2>/dev/null || true
           echo "=== BaseBuff.cs 的 MaxCount（诊断） ==="
