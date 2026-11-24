@@ -114,7 +114,7 @@ def fix_cs0246():
             # 定义存在：引用文件可能缺 using——跳过（复杂），仅记录
             print(f"  CS0246: {t} 定义存在于 {defs[t][:2]}（需人工检查 using）")
             continue
-        # 无定义 → stub
+        # 无定义 → stub（I 开头驼峰命名 → 接口桩，防止被当基类触发 CS1721）
         stub_dir = os.path.join(root, 'Assets', 'Scripts', 'Stubs')
         os.makedirs(stub_dir, exist_ok=True)
         sp = os.path.join(stub_dir, f'Stub_{t}.cs')
@@ -125,6 +125,9 @@ def fix_cs0246():
                         f'    public static T Instance {{ get; set; }}\n'
                         f'    public virtual void OnEnableImpl() {{ }}\n}}\n')
                 open(sp, 'w', encoding='utf-8').write(body)
+            elif re.match(r'^I[A-Z]', t):
+                open(sp, 'w', encoding='utf-8').write(
+                    f'// 自动生成的缺失接口桩（全局命名空间）\npublic interface {t} {{ }}\n')
             else:
                 open(sp, 'w', encoding='utf-8').write(
                     f'// 自动生成的缺失类型桩（全局命名空间）\npublic class {t} : UnityEngine.MonoBehaviour {{ }}\n')
@@ -276,6 +279,69 @@ def _insert_in_class(path, s, cls, decl):
     open(path, 'w', encoding='utf-8').write(new_s)
     return True
 
+# ---------- CS0117：枚举缺成员 → 给枚举补成员 ----------
+def fix_cs0117():
+    n = 0
+    seen = set()
+    for f, ln, msg in by_code.get('CS0117', []):
+        m = re.match(r"'(\w+)' does not contain a definition for '(\w+)'", msg)
+        if not m:
+            continue
+        enum, member = m.group(1), m.group(2)
+        key = (enum, member)
+        if key in seen:
+            continue
+        seen.add(key)
+        # 全工程找枚举定义
+        target = None
+        idx = _class_index()
+        for p in idx.get(enum, []):
+            try:
+                s = open(p, encoding='utf-8', errors='ignore').read()
+            except Exception:
+                continue
+            em = re.search(r'\benum\s+' + re.escape(enum) + r'\b[^{]*\{', s)
+            if em:
+                target = (p, s, em.end())
+                break
+        if not target:
+            print(f"  CS0117: {enum} 枚举定义未找到（跳过）")
+            continue
+        p, s, pos = target
+        if re.search(r'\b' + re.escape(member) + r'\b', s):
+            continue  # 已有成员（可能别名/其他错误）
+        # 插入 Default = 0（值重复合法，不会破坏显式值成员）
+        new_s = s[:pos] + f'\n    {member} = 0,' + s[pos:]
+        open(p, 'w', encoding='utf-8').write(new_s)
+        n += 1
+        print(f"  CS0117: {os.path.basename(p)} 枚举 {enum} 补成员 {member} = 0")
+    return n
+
+# ---------- CS1721：接口被当成基类（CS0246 stub 生成了 class）→ stub 改 interface ----------
+def fix_cs1721():
+    n = 0
+    seen = set()
+    for f, ln, msg in by_code.get('CS1721', []):
+        m = re.match(r"Class '\w+' cannot have multiple base classes: '[\w.]+' and '([\w.]+)'", msg)
+        if not m:
+            continue
+        iface = m.group(1).split('.')[-1]
+        if iface in seen:
+            continue
+        seen.add(iface)
+        # 找全局 stub class 定义并改为 interface
+        sp = os.path.join(root, 'Assets', 'Scripts', 'Stubs', f'Stub_{iface}.cs')
+        if not os.path.exists(sp):
+            continue
+        s = open(sp, encoding='utf-8', errors='ignore').read()
+        new_s = re.sub(r'\bpublic\s+class\s+(' + re.escape(iface) + r')\b[^{]*\{',
+                       r'public interface \1 {', s, count=1)
+        if new_s != s:
+            open(sp, 'w', encoding='utf-8').write(new_s)
+            n += 1
+            print(f"  CS1721: Stub_{iface}.cs class→interface")
+    return n
+
 # ---------- CS0106：virtual 修饰符无效 → 删除该行的 virtual ----------
 def fix_cs0106():
     n = 0
@@ -323,7 +389,7 @@ def _class_index():
                     continue
                 if len(src) > 400000:
                     src = src[:400000]
-                for m in re.finditer(r'\b(?:class|struct|interface)\s+([A-Za-z_]\w*)', src):
+                for m in re.finditer(r'\b(?:class|struct|interface|enum)\s+([A-Za-z_]\w*)', src):
                     idx.setdefault(m.group(1), []).append(p)
     CLASS_INDEX = idx
     return idx
@@ -343,7 +409,8 @@ LIFECYCLE_METHODS = {
 def fix_cs0115():
     """'X.M()': no suitable method found to override
     → 沿继承链向上：基类方法是普通方法则加 virtual；是 override 则继续向上；
-    追到引擎基类（MonoBehaviour 等）则是反编译错加的 override，直接删除 override 关键字。"""
+    追到引擎基类 / 链顶（无同名方法）→ 是反编译错加的 override，删除 override 关键字
+    （v6：不再限定生命周期方法——Unity 生命周期与游戏虚方法都会被错加）。"""
     n = 0
     seen = set()
     for f, ln, msg in by_code.get('CS0115', []):
@@ -358,15 +425,13 @@ def fix_cs0115():
 
         cur_cls, cur_file = cls, os.path.join(root, f)
         chain = 0
-        prev_override_file = cur_file  # 最初错误文件（追到引擎时删它的 override）
-        while chain < 8:
+        resolved = False  # True=基类已虚（override 合法）或已加 virtual
+        while chain < 8 and cur_file:
             chain += 1
             try:
                 src = open(cur_file, encoding='utf-8', errors='ignore').read()
             except Exception:
-                cur_file = None
                 break
-            # 当前类的方法/属性声明（属性无括号，形如 int BuffType { 或 =>）
             mdecl = re.search(
                 r'^(\s*)((?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)'
                 r'(?:\s+static)?(?:\s+sealed)?(?:\s+extern)?(?:\s+new)?(?:\s+unsafe)?)'
@@ -374,10 +439,11 @@ def fix_cs0115():
                 r'((?:[\w<>\[\],.?:]+?)\s+)?' + re.escape(meth) + r'\s*<*\s*(?:\(|\{|=>)',
                 src, re.M)
             if not mdecl:
-                break  # 当前文件无此方法/属性（理论少见）
+                break  # 当前类无此成员 → 链顶 → 删 override
             mods = mdecl.group(2) + (mdecl.group(3) or '')
             if 'virtual' in mods or 'abstract' in mods:
-                break  # 已是虚方法（前轮修好），本轮不动
+                resolved = True
+                break
             if 'override' not in mods:
                 # 普通方法/属性 → 加 virtual
                 pat = re.compile(
@@ -394,6 +460,7 @@ def fix_cs0115():
                     open(cur_file, 'w', encoding='utf-8').write(new_src)
                     n += 1
                     print(f"  CS0115: {os.path.basename(cur_file)}({cur_cls}).{meth} → virtual")
+                resolved = True
                 break
             # 是 override → 看类基类继续向上
             cm = re.search(r'\bclass\s+' + re.escape(cur_cls) + r'\b[^{]*:\s*([A-Za-z_][\w.]*)', src)
@@ -401,24 +468,22 @@ def fix_cs0115():
                 break
             nxt = cm.group(1).split('.')[-1]
             if nxt in ('MonoBehaviour', 'ScriptableObject', 'object', 'Object') or nxt == cur_cls:
-                # 追到引擎：最初错误文件里错加的 override → 删除（仅生命周期方法）
-                if meth in LIFECYCLE_METHODS:
-                    esrc = open(prev_override_file, encoding='utf-8', errors='ignore').read()
-                    pat2 = re.compile(
-                        r'(\b(?:public|protected|internal|private)\s+)override(\s+(?:[\w<>\[\],.?:]+?)\s+)'
-                        + re.escape(meth) + r'\s*<*\s*\(')
-                    new_src, cnt = pat2.subn(r'\1\2' + meth + '(', esrc, count=1)
-                    if cnt:
-                        open(prev_override_file, 'w', encoding='utf-8').write(new_src)
-                        n += 1
-                        print(f"  CS0115: {os.path.basename(prev_override_file)}.{meth} 删除 override（生命周期方法）")
-                break
-            # 继续向上
+                break  # 追到引擎 → 链顶 → 删 override
             nxt_file = _find_class_file(nxt, [os.path.dirname(cur_file)])
             if not nxt_file:
-                break
-            prev_override_file = cur_file
+                break  # 基类不在源码索引（引擎/第三方/DLL）→ 链顶 → 删 override
             cur_cls, cur_file = nxt, nxt_file
+        if not resolved:
+            # 追到链顶无同名成员 → 反编译错加的 override → 删除关键字
+            esrc = open(os.path.join(root, f), encoding='utf-8', errors='ignore').read()
+            pat2 = re.compile(
+                r'(\b(?:public|protected|internal|private)\s+)override(\s+(?:[\w<>\[\],.?:]+?)\s+'
+                + re.escape(meth) + r'\s*<*\s*(?:\(|\{|=>))')
+            new_src, cnt = pat2.subn(r'\1\2', esrc, count=1)
+            if cnt:
+                open(os.path.join(root, f), 'w', encoding='utf-8').write(new_src)
+                n += 1
+                print(f"  CS0115: {os.path.basename(f)}.{meth} 删除 override（链顶无同名）")
     return n
 
 if 'CS0104' in by_code: stats.append(('CS0104', fix_cs0104()))
@@ -429,6 +494,8 @@ if 'CS0138' in by_code: stats.append(('CS0138', fix_cs0138()))
 if 'CS0549' in by_code: stats.append(('CS0549', fix_cs0549()))
 if 'CS0534' in by_code: stats.append(('CS0534', fix_cs0534()))
 if 'CS0106' in by_code: stats.append(('CS0106', fix_cs0106()))
+if 'CS0117' in by_code: stats.append(('CS0117', fix_cs0117()))
+if 'CS1721' in by_code: stats.append(('CS1721', fix_cs1721()))
 
 print(f"修复文件数: {len(fixed_files)}")
 for code, n in stats:
