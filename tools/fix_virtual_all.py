@@ -68,14 +68,16 @@ for p in files:
     lines = src.split('\n')
     cur_cls = None
     cur_kind = 'class'
+    cur_sealed = False
     changed = False
     for i, line in enumerate(lines):
         cm = re.search(r'\b(class|struct|interface)\s+([A-Za-z_]\w*)', line)
         if cm:
             cur_cls = cm.group(2)
             cur_kind = cm.group(1)
-        if cur_kind != 'class':
-            continue  # struct/interface 成员不能 virtual
+            cur_sealed = bool(re.search(r'\bsealed\b|\breadonly struct\b|\bref struct\b', line))
+        if cur_kind != 'class' or cur_sealed:
+            continue  # struct/interface/sealed 成员不能 virtual
         cm2 = METHOD_PAT.search(line)
         if not cm2:
             continue
@@ -138,14 +140,14 @@ def has_member_upstream(start_cls, meth, max_depth=10):
         bsrc = get_src(bfile)
         # 基类里有没有同名成员（方法或属性）
         if re.search(r'\b' + re.escape(meth) + r'\s*(?:\(|\{|=>)', bsrc):
-            # 普通方法 → 当场加 virtual（保证派生类 override 合法）
-            bsrc2, cnt = re.subn(
-                r'(\b(?:public|protected|internal)\b)(\s+)((?!virtual\b|abstract\b|static\b|override\b)[\w<>,\s]*?\s*)'
-                + r'(\b' + re.escape(meth) + r'\b)',
-                r'\1 virtual\2\4', bsrc, count=1)
-            if cnt and bsrc2 != bsrc:
-                srcs[bfile] = bsrc2
-                written.add(bfile)
+            # 普通方法 → 当场加 virtual（lookahead 方式，只插修饰符不动签名）
+            if re.search(r'\bpublic\s+(?!virtual\b|abstract\b|static\b|override\b)', bsrc):
+                bsrc2, cnt = re.subn(
+                    r'(\bpublic\b)(\s+)(?=[\w<>\[\],.?:]+?\s+' + re.escape(meth) + r'\s*(?:\(|\{|=>))',
+                    r'\1 virtual\2', bsrc, count=1)
+                if cnt and bsrc2 != bsrc:
+                    srcs[bfile] = bsrc2
+                    written.add(bfile)
             return True
         cls = base
         depth += 1
