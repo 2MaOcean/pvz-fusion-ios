@@ -358,13 +358,18 @@ jobs:
                           if (File.Exists(src)) { File.Copy(src, Path.Combine(tmp, f), true); Debug.Log("[CI] staged " + f); }
                           else Debug.LogWarning("[CI] not in ScriptAssemblies: " + f);
                       }
-                      // 删第三方源码目录
+                      // 关键顺序：先删源码目录 → 立即把真实 DLL 拷进 Plugins（防删包后断链、
+                      // 防 Refresh 触发的重编译因引用缺失而中止 executeMethod）→ 再删包
                       if (Directory.Exists("Assets/ThirdParty")) Directory.Delete("Assets/ThirdParty", true);
                       if (File.Exists("Assets/ThirdParty.meta")) File.Delete("Assets/ThirdParty.meta");
-                      // 删 Core 源码目录（已编译成真实 Core.dll 拷回 Plugins）
                       if (Directory.Exists("Assets/CoreSrc")) Directory.Delete("Assets/CoreSrc", true);
                       if (File.Exists("Assets/CoreSrc.meta")) File.Delete("Assets/CoreSrc.meta");
-                      // 移除包（防同名冲突；2022.3 的 Client.Remove 只接受单包名）
+                      foreach (var f in CopyList) {
+                          var src = Path.Combine(tmp, f);
+                          if (File.Exists(src)) { File.Copy(src, Path.Combine("Assets/Plugins", f), true); Debug.Log("[CI] copied " + f); }
+                          else Debug.LogWarning("[CI] not staged, skip copy: " + f);
+                      }
+                      // 移除包（此时源码已删、DLL 已在位，任何时点的重编译都有依赖可用）
                       foreach (var pkg in PackagesToRemove) {
                           try {
                               var req = Client.Remove(pkg);
@@ -372,13 +377,6 @@ jobs:
                               while (!req.IsCompleted && sw.Elapsed.TotalSeconds < 120) System.Threading.Thread.Sleep(200);
                               Debug.Log("[CI] Remove " + pkg + ": " + req.Status + " (" + sw.Elapsed.TotalSeconds + "s)");
                           } catch (System.Exception e) { Debug.LogWarning("[CI] Remove " + pkg + " err: " + e.Message); }
-                      }
-                      AssetDatabase.Refresh();
-                      while (EditorApplication.isCompiling) System.Threading.Thread.Sleep(300);
-                      // 真实 DLL 拷入 Plugins（meta 保留在位）
-                      foreach (var f in CopyList) {
-                          var src = Path.Combine(tmp, f);
-                          if (File.Exists(src)) { File.Copy(src, Path.Combine("Assets/Plugins", f), true); Debug.Log("[CI] copied " + f); }
                       }
                       AssetDatabase.Refresh();
                       while (EditorApplication.isCompiling) System.Threading.Thread.Sleep(300);
