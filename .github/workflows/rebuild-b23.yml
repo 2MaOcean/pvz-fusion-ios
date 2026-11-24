@@ -410,6 +410,27 @@ jobs:
           echo "--- 剩余错误清单 ---"
           grep -E "error CS" "$LOG" 2>/dev/null | sort -u | head -30 || echo "(无)"
 
+      - name: 核心日志上传 Release（手机端免翻墙读取）
+        if: always()
+        run: |
+          cd ExportedProject/ExportedProject 2>/dev/null || true
+          TOKEN="${{ secrets.GITHUB_TOKEN }}"
+          curl -s -X POST -H "Authorization: token $TOKEN" \
+            https://api.github.com/repos/${{ github.repository }}/releases \
+            -d '{"tag_name":"build-logs","name":"构建日志"}' > /dev/null
+          REL=$(curl -s -H "Authorization: token $TOKEN" https://api.github.com/repos/${{ github.repository }}/releases/tags/build-logs | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
+          if [ -f unity_build.log ]; then
+            grep -E "error CS|FINAL:|迭代 |Script Compilation Error|错误总数|STAT |\[CI\]" unity_build.log | tail -800 > /tmp/build_summary.txt
+            echo "=== xcodebuild/app 阶段 ===" >> /tmp/build_summary.txt
+            tail -60 unity_build.log >> /tmp/build_summary.txt
+          else
+            echo "unity_build.log not found" > /tmp/build_summary.txt
+          fi
+          curl -s -X POST -H "Authorization: token $TOKEN" -H "Content-Type: text/plain" \
+            --data-binary @/tmp/build_summary.txt \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/$REL/assets?name=build_summary.txt" \
+            | python3 -c "import json,sys;d=json.load(sys.stdin);print('LOG UP:', d.get('name'), d.get('message',''))"
+
       - name: xcodebuild 编译 ipa
         run: |
           cd ExportedProject/ExportedProject
