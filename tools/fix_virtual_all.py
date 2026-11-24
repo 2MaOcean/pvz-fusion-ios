@@ -210,7 +210,10 @@ for p in list(srcs.keys()):
             line)
         if m:
             ind, typ, name, args = m.groups()
-            out.append(f"{ind}public virtual {typ} {name}({args}) {{ return default({typ}); }}")
+            if typ == 'void':
+                out.append(f"{ind}public virtual void {name}({args}) {{ }}")
+            else:
+                out.append(f"{ind}public virtual {typ} {name}({args}) {{ return default({typ}); }}")
             changed = True
             n_abs += 1
             continue
