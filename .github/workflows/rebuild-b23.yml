@@ -160,6 +160,20 @@ jobs:
           done
           # 3) 彻底删除（不需要 GUID 的）
           rm -f "$P/__Generated.dll" "$P/__Generated.dll.meta" "$P/System.Runtime.CompilerServices.Unsafe.dll" "$P/System.Runtime.CompilerServices.Unsafe.dll.meta"
+          # 4) 清除所有 DummyDll 来源的 DLL（含 Il2CppDummyDll 特性引用，UnityLinker 解析即崩）：
+          #    Core.dll 由 CoreSrc 的 stub 源码真实化；其余无人引用直接删（meta 保留）
+          rm -f "$P/Core.dll" "$P/Unity.MemoryProfiler.dll" "$P/Unity.InternalAPIEngineBridge.001.dll" \
+                "$P/Unity.RenderPipeline.Universal.ShaderLibrary.dll"
+          echo "dummy 清理完成: $(ls "$P" | grep -c '\\.dll$') 个 dll 剩余"
+          # 5) Core 框架 stub（游戏代码仅引用 Singleton<T>；签名兼容 il2cpp 用法）
+          mkdir -p ExportedProject/ExportedProject/Assets/CoreSrc
+          cat > ExportedProject/ExportedProject/Assets/CoreSrc/Singleton.cs <<'EOF'
+          namespace Core {
+              public abstract class Singleton<T> : UnityEngine.MonoBehaviour where T : UnityEngine.MonoBehaviour {
+                  public static T Instance;
+              }
+          }
+          EOF
           ls -la "$P" | head -40
 
       - name: 源码完整性恢复（缺失类从原始包找回 + 解除误禁用 + 清除污染 stub）
