@@ -61,10 +61,25 @@ jobs:
             -p "${{ secrets.UNITY_PASSWORD }}" 2>&1 | grep -vi password | head -8 || true
           ls -la "/Library/Application Support/Unity/" 2>/dev/null | head -5
 
-      - name: 下载 ExportedProject + 脚本结构诊断
+      - name: 下载 ExportedProject（优先用上一轮累积修复版）+ 诊断
         run: |
-          curl -sL -o ep.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
-          tar xzf ep.tar.gz
+          TOKEN="${{ secrets.GITHUB_TOKEN }}"
+          # 查 rebuild-41-ios 是否有累积修复版
+          FIXED_URL=$(curl -s -H "Authorization: token $TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/rebuild-41-progress" --max-time 40 \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); a=[x for x in d.get('assets',[]) if x['name']=='ep-assets-fixed.tar.gz']; print(a[0]['browser_download_url'] if a else '')" 2>/dev/null)
+          if [ -n "$FIXED_URL" ]; then
+            echo "使用累积修复版 Assets"
+            curl -sL -o ep.tar.gz "$FIXED_URL"
+            tar xzf ep.tar.gz
+            # 补齐 tar 里没有的工程级文件（Packages 等）从原始包
+            curl -sL -o ep-orig.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
+            tar xzf ep-orig.tar.gz ExportedProject/ExportedProject/Packages 2>/dev/null || true
+          else
+            echo "无累积修复版，使用原始包"
+            curl -sL -o ep.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
+            tar xzf ep.tar.gz
+          fi
           echo "=== Assets/Scripts 顶层目录（判断 Core/spine/UniTask 是否有源码）==="
           find ExportedProject/ExportedProject/Assets/Scripts -maxdepth 1 -type d | sort
           echo "=== 抽查 Core.dll 源码是否存在 ==="
@@ -387,6 +402,25 @@ jobs:
               --data-binary @/tmp/PvzFusion-4.1-unsigned.ipa \
               "https://uploads.github.com/repos/${{ github.repository }}/releases/$REL/assets?name=PvzFusion-4.1-unsigned.ipa" | python3 -c "import json,sys;d=json.load(sys.stdin);print('RELEASED:', d.get('name'), d.get('size'), d.get('message',''))"
           fi
+
+      - name: 上传累积修复版 Assets 到 Release（供下一轮增量收敛）
+        if: always()
+        run: |
+          [ -d ExportedProject/ExportedProject/Assets ] || { echo "no assets"; exit 0; }
+          cd ExportedProject/ExportedProject
+          tar czf /tmp/ep-assets-fixed.tar.gz Assets
+          cd "$GITHUB_WORKSPACE"
+          TOKEN="${{ secrets.GITHUB_TOKEN }}"
+          curl -s -X POST -H "Authorization: token $TOKEN" "https://api.github.com/repos/${{ github.repository }}/releases" \
+            -d '{"tag_name":"rebuild-41-progress","name":"B 阶段累积修复版（自动）"}' > /dev/null || true
+          REL=$(curl -s -H "Authorization: token $TOKEN" "https://api.github.com/repos/${{ github.repository }}/releases/tags/rebuild-41-progress" | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
+          # 删旧 asset（覆盖）
+          OLD=$(curl -s -H "Authorization: token $TOKEN" "https://api.github.com/repos/${{ github.repository }}/releases/tags/rebuild-41-progress" | python3 -c "import json,sys; d=json.load(sys.stdin); a=[x for x in d.get('assets',[]) if x['name']=='ep-assets-fixed.tar.gz']; print(a[0]['id'] if a else '')")
+          [ -n "$OLD" ] && curl -s -X DELETE -H "Authorization: token $TOKEN" "https://api.github.com/repos/${{ github.repository }}/releases/assets/$OLD" > /dev/null
+          curl -s -X POST -H "Authorization: token $TOKEN" -H "Content-Type: application/octet-stream" \
+            --data-binary @/tmp/ep-assets-fixed.tar.gz \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/$REL/assets?name=ep-assets-fixed.tar.gz" \
+            | python3 -c "import json,sys;d=json.load(sys.stdin);print('SAVED:', d.get('name'), round(d.get('size',0)/1024/1024,1),'MB', d.get('message',''))"
 
       - name: 上传日志
         if: always()
