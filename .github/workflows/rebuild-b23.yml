@@ -340,6 +340,8 @@ jobs:
           python3 "$GITHUB_WORKSPACE/tools/fix_virtual_all.py" "$PWD" || true
           echo "=== GeneralBuff.cs 修复后现场（诊断） ==="
           sed -n '1,15p' Assets/Scripts/Assembly-CSharp/GameLevel/RogueShooting/GeneralBuff.cs 2>/dev/null || true
+          echo "=== BaseBuff.cs 的 MaxCount（诊断） ==="
+          grep -n "MaxCount" Assets/Scripts/Assembly-CSharp/BaseBuff.cs 2>/dev/null | head -3 || true
           for ROUND in $(seq 1 20); do
             echo "########## 迭代 $ROUND ##########"
             rm -f "$LOG"
