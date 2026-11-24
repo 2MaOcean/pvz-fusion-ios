@@ -171,7 +171,7 @@ for cls, meth, p in overrides:
             cur_cls = cm.group(1)
         if cur_cls == cls and re.search(r'\boverride\s+', line) and re.search(
                 r'\boverride\s+(?:[\w<>\[\],.?:]+?)\s+' + re.escape(meth) + r'\b', line):
-            line = re.sub(r'\boverride\s+', '', line, count=1)
+            line = re.sub(r'\boverride\s+', 'virtual ', line, count=1)
             changed = True
             stats['del'] += 1
         new_lines.append(line)
