@@ -276,6 +276,12 @@ jobs:
           done
           cp -R /tmp/unitask-repo/src/UniTask/Assets/Plugins/UniTask/Runtime/* "$A/unitask/"
           find "$A/unitask" -name "*.asmdef*" -delete
+          # UnityWebRequest 段条件编译在 iOS 下被排除（UNITASK_WEBREQUEST_SUPPORT 未定义）→ 直接放宽条件
+          sed -i.bak 's/#if ENABLE_UNITYWEBREQUEST && (!UNITY_2019_1_OR_NEWER || UNITASK_WEBREQUEST_SUPPORT)/#if ENABLE_UNITYWEBREQUEST/' \
+            "$A/unitask/UnityAsyncExtensions.cs" 2>/dev/null || \
+            sed -i 's/#if ENABLE_UNITYWEBREQUEST && (!UNITY_2019_1_OR_NEWER || UNITASK_WEBREQUEST_SUPPORT)/#if ENABLE_UNITYWEBREQUEST/' \
+            "$A/unitask/UnityAsyncExtensions.cs"
+          grep -n "ENABLE_UNITYWEBREQUEST" "$A/unitask/UnityAsyncExtensions.cs" | head -3
           # SimpleFileBrowser（正确路径：Plugins/SimpleFileBrowser 含全套 Prefabs/Resources）
           for TRY in 1 2 3; do
             git clone --depth 1 https://github.com/yasirkula/UnitySimpleFileBrowser /tmp/sfb-repo 2>&1 | tail -1 && break
@@ -410,7 +416,6 @@ jobs:
           # 导致真正的 error 行丢失、修复器抓不到错误）
           printf '%s\n' -nowarn:0114 -nowarn:0108 -nowarn:0109 -nowarn:0649 \
             -nowarn:0219 -nowarn:0414 -nowarn:0067 -nowarn:0660 -nowarn:0661 -nowarn:3021 \
-            -define:UNITASK_WEBREQUEST_SUPPORT \
             > Assets/csc.rsp
           # 全量修复反编译丢失的 virtual（一次性建索引扫描全部 override，不再依赖错误驱动）
           python3 "$GITHUB_WORKSPACE/tools/fix_virtual_all.py" "$PWD" || true
