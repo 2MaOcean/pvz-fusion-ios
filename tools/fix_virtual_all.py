@@ -184,5 +184,42 @@ for cls, meth, p in overrides:
 for p in written:
     open(p, 'w', encoding='utf-8').write(srcs[p])
 
+# ---------- 4. 第三遍：abstract 类的 abstract 成员 → virtual + 默认实现 ----------
+# （派生类几十个未实现 abstract 属性/方法，改 virtual 给默认体一次清掉 CS0534）
+n_abs = 0
+for p in list(srcs.keys()):
+    src = srcs[p]
+    if 'abstract' not in src:
+        continue
+    changed = False
+    out = []
+    for line in src.split('\n'):
+        # abstract 属性：public abstract T X { get; }
+        m = re.match(
+            r'(\s*)public\s+abstract\s+([\w<>\[\],.?]+)\s+([A-Za-z_]\w*)\s*\{\s*get;\s*\}\s*$',
+            line)
+        if m:
+            ind, typ, name = m.groups()
+            out.append(f"{ind}public virtual {typ} {name} {{ get {{ return default({typ}); }} }}")
+            changed = True
+            n_abs += 1
+            continue
+        # abstract 方法：public abstract T X(args);
+        m = re.match(
+            r'(\s*)public\s+abstract\s+([\w<>\[\],.?]+)\s+([A-Za-z_]\w*)\s*\((.*)\)\s*;\s*$',
+            line)
+        if m:
+            ind, typ, name, args = m.groups()
+            out.append(f"{ind}public virtual {typ} {name}({args}) {{ return default({typ}); }}")
+            changed = True
+            n_abs += 1
+            continue
+        out.append(line)
+    if changed:
+        srcs[p] = '\n'.join(out)
+        written.add(p)
+        open(p, 'w', encoding='utf-8').write(srcs[p])
+print(f"第三遍: abstract→virtual+默认体 {n_abs} 个")
+
 print(f"完成: 保留合法 override={stats['keep']}, 删除错加 override={stats['del']}, "
       f"无文件匹配={stats['nofile']}, 写文件={len(written)}")
