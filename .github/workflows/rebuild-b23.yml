@@ -69,17 +69,25 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/rebuild-41-progress" --max-time 40 \
             | python3 -c "import json,sys; d=json.load(sys.stdin); a=[x for x in d.get('assets',[]) if x['name']=='ep-assets-fixed.tar.gz']; print(a[0]['browser_download_url'] if a else '')" 2>/dev/null)
           if [ -n "$FIXED_URL" ]; then
-            echo "使用累积修复版 Assets"
-            curl -sL -o ep.tar.gz "$FIXED_URL"
-            tar xzf ep.tar.gz
-            # 补齐 tar 里没有的工程级文件（Packages 等）从原始包
-            curl -sL -o ep-orig.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
-            tar xzf ep-orig.tar.gz ExportedProject/ExportedProject/Packages 2>/dev/null || true
+            echo "尝试累积修复版 Assets"
+            curl -sfL --retry 3 --retry-all-errors -o ep.tar.gz "$FIXED_URL" 2>/dev/null
+            if [ -s ep.tar.gz ] && tar xzf ep.tar.gz 2>/dev/null && [ -d ExportedProject/ExportedProject/Assets/Plugins ]; then
+              echo "累积版解压 OK"
+              curl -sL -o ep-orig.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
+              tar xzf ep-orig.tar.gz ExportedProject/ExportedProject/Packages 2>/dev/null || true
+            else
+              echo "累积版不可用（下载中断/不完整），回退原始包"
+              rm -rf ExportedProject ep.tar.gz
+              curl -sfL -o ep.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
+              tar xzf ep.tar.gz
+            fi
           else
             echo "无累积修复版，使用原始包"
-            curl -sL -o ep.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
+            curl -sfL -o ep.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
             tar xzf ep.tar.gz
           fi
+          # 最终校验关键目录
+          [ -d ExportedProject/ExportedProject/Assets/Plugins ] || { echo "FATAL: Assets/Plugins 仍缺失"; ls ExportedProject/ExportedProject/Assets/ 2>/dev/null; exit 1; }
           echo "=== Assets/Scripts 顶层目录（判断 Core/spine/UniTask 是否有源码）==="
           find ExportedProject/ExportedProject/Assets/Scripts -maxdepth 1 -type d | sort
           echo "=== 抽查 Core.dll 源码是否存在 ==="
