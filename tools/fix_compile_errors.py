@@ -20,6 +20,9 @@ for f, ln, code, msg in errs:
 print(f"错误总数: {len(errs)}")
 for code, items in sorted(by_code.items()):
     print(f"  {code}: {len(items)}")
+# Bee 输出截断检测：有编译失败标记但解析不到错误 → 提示（错误消息被 warning 洪水截断）
+if not errs and '## Script Compilation Error' in text:
+    print("WARN: 检测到 Script Compilation Error 但无 error 行 —— 输出被截断，需抑制 warning（csc.rsp）")
 
 fixed_files = set()
 stats = []

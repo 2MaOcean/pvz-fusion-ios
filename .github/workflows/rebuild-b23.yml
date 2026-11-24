@@ -371,6 +371,11 @@ jobs:
           UNI="$UNITY_EXE"
           LOG="$PWD/unity_build.log"
           SUCCESS=0
+          # 抑制海量 hiding/unassigned warning（几千条 CS0114 会撑爆 Bee 的 ## Output 截断，
+          # 导致真正的 error 行丢失、修复器抓不到错误）
+          printf '%s\n' -nowarn:0114 -nowarn:0108 -nowarn:0109 -nowarn:0649 \
+            -nowarn:0219 -nowarn:0414 -nowarn:0067 -nowarn:0660 -nowarn:0661 -nowarn:3021 \
+            > Assets/csc.rsp
           # 全量修复反编译丢失的 virtual（一次性建索引扫描全部 override，不再依赖错误驱动）
           python3 "$GITHUB_WORKSPACE/tools/fix_virtual_all.py" "$PWD" || true
           # 修复历史损坏行（virtual 误替换了 override int）
