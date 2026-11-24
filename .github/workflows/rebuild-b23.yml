@@ -162,6 +162,40 @@ jobs:
           rm -f "$P/__Generated.dll" "$P/__Generated.dll.meta" "$P/System.Runtime.CompilerServices.Unsafe.dll" "$P/System.Runtime.CompilerServices.Unsafe.dll.meta"
           ls -la "$P" | head -40
 
+      - name: 源码完整性恢复（缺失类从原始包找回 + 解除误禁用 + 清除污染 stub）
+        run: |
+          set -x
+          S=ExportedProject/ExportedProject/Assets/Scripts
+          # 1) 确保原始包在手（历史累积包丢过 Plant.cs 等核心源码）
+          if [ ! -f ep-orig.tar.gz ]; then
+            if [ -f ep.tar.gz ]; then
+              cp ep.tar.gz ep-orig.tar.gz   # 回退分支：ep.tar.gz 即原始包
+            else
+              curl -sfL -o ep-orig.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
+            fi
+          fi
+          rm -rf /tmp/orig-src && mkdir -p /tmp/orig-src
+          tar xzf ep-orig.tar.gz -C /tmp/orig-src "ExportedProject/ExportedProject/Assets/Scripts" 2>/dev/null || true
+          ORIG=/tmp/orig-src/ExportedProject/ExportedProject/Assets/Scripts
+          # 2) 原始包有、工程没有的 .cs/.meta → 恢复（防 stub 空壳化污染）
+          #    排除 Assembly-CSharp/Core（已拆出到 CoreSrc，恢复会重复定义）
+          n=0
+          cd "$ORIG" 2>/dev/null && find . \( -path ./Assembly-CSharp/Core -o -path ./Assembly-CSharp/Core.meta \) -prune -o \( -name "*.cs" -o -name "*.cs.meta" \) -print | while read -r rel; do
+            if [ ! -f "$OLDPWD/$S/$rel" ]; then
+              mkdir -p "$OLDPWD/$S/$(dirname "$rel")"
+              cp "$rel" "$OLDPWD/$S/$rel" && n=$((n+1))
+            fi
+          done
+          cd "$GITHUB_WORKSPACE"
+          echo "恢复缺失源码文件: $(find $S -name '*.cs' | wc -l) 个 .cs 现存"
+          # 3) 解除全部误禁用（CS0426 盲禁的文件；根因修复后大多可编译）
+          find "$S" -name "*.cs.disabled" | while read -r f; do mv -f "$f" "${f%.disabled}"; done
+          find "$S" -name "*.cs.disabled.meta" | while read -r f; do mv -f "$f" "${f%.disabled.meta}.meta"; done
+          # 4) 清除污染 stub（遮蔽真实类型；真实类型随 ugui 包/源码恢复回归）
+          rm -rf ExportedProject/ExportedProject/Assets/Scripts/Stubs ExportedProject/ExportedProject/Assets/Scripts/Stubs.meta
+          echo "=== 恢复后统计 ==="
+          echo "cs: $(find $S -name '*.cs' | wc -l)  disabled: $(find $S -name '*.disabled' | wc -l)  stubs: $(ls ExportedProject/ExportedProject/Assets/Scripts/Stubs 2>/dev/null | wc -l)"
+
       - name: Newtonsoft.Json 真实 DLL 覆盖（NuGet）
         run: |
           set -x
@@ -190,6 +224,7 @@ jobs:
             "com.unity.collections":                ["1.5.1", "2.1.4"],
             "com.unity.mathematics":                ["1.2.6", "1.2.1"],
             "com.unity.visualscripting":            ["1.9.4", "1.8.0", "1.7.8"],
+            "com.unity.ugui":                       ["1.0.0"],
           }
           def check(pkg, ver):
               try:

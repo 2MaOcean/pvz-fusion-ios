@@ -57,19 +57,12 @@ def msg_of(by_code, code, rel):
         if f == rel: return msg
     return ''
 
-# ---------- CS0426：嵌套类型缺失 → 文件排除 ----------
+# ---------- CS0426：嵌套类型缺失 → 仅记录（v7：禁用文件曾造成 150 个文件误伤）----------
 def fix_cs0426():
-    n = 0
     files = {f for f, ln, msg in by_code.get('CS0426', [])}
     for rel in sorted(files):
-        path = os.path.join(root, rel)
-        if not os.path.exists(path): continue
-        disabled = path + '.disabled'
-        if os.path.exists(disabled): continue
-        os.rename(path, disabled)
-        fixed_files.add(rel); n += 1
-        print(f"  CS0426 excluded: {rel} -> {os.path.basename(disabled)}")
-    return n
+        print(f"  CS0426 (仅记录，不禁用): {rel}")
+    return 0
 
 # ---------- CS0246：类型缺失 → 工程内搜定义改引用 / stub ----------
 def fix_cs0138():
@@ -114,25 +107,9 @@ def fix_cs0246():
             # 定义存在：引用文件可能缺 using——跳过（复杂），仅记录
             print(f"  CS0246: {t} 定义存在于 {defs[t][:2]}（需人工检查 using）")
             continue
-        # 无定义 → stub（I 开头驼峰命名 → 接口桩，防止被当基类触发 CS1721）
-        stub_dir = os.path.join(root, 'Assets', 'Scripts', 'Stubs')
-        os.makedirs(stub_dir, exist_ok=True)
-        sp = os.path.join(stub_dir, f'Stub_{t}.cs')
-        if not os.path.exists(sp):
-            if generic:
-                body = (f'// 自动生成的缺失泛型单例桩\n'
-                        f'public class {t}<T> : UnityEngine.MonoBehaviour where T : class {{\n'
-                        f'    public static T Instance {{ get; set; }}\n'
-                        f'    public virtual void OnEnableImpl() {{ }}\n}}\n')
-                open(sp, 'w', encoding='utf-8').write(body)
-            elif re.match(r'^I[A-Z]', t):
-                open(sp, 'w', encoding='utf-8').write(
-                    f'// 自动生成的缺失接口桩（全局命名空间）\npublic interface {t} {{ }}\n')
-            else:
-                open(sp, 'w', encoding='utf-8').write(
-                    f'// 自动生成的缺失类型桩（全局命名空间）\npublic class {t} : UnityEngine.MonoBehaviour {{ }}\n')
-            n += 1
-            print(f"  CS0246 stub: {t}{'<T>' if generic else ''}")
+        # 无定义 → 仅记录（v7：stub 空壳曾把 Plant/Board/UGUI 类型污染成空类，改由
+        # workflow 的「源码完整性恢复」步骤从原始包找回真实类型；确实缺失的类型下轮人工 stub）
+        print(f"  CS0246 missing (仅记录): {t}{'<T>' if generic else ''} 在 {[os.path.basename(x) for x in sorted(ref_files)][:3]}")
     return n
 
 # ---------- CS0549：sealed 类里的新 virtual 成员 → 改 override（恢复真实重写关系）----------
