@@ -129,6 +129,174 @@ def fix_cs0246():
             print(f"  CS0246 stub: {t}{'<T>' if generic else ''}")
     return n
 
+# ---------- CS0549：sealed 类里的新 virtual 成员 → 改 override（恢复真实重写关系）----------
+def fix_cs0549():
+    n = 0
+    seen = set()
+    for f, ln, msg in by_code.get('CS0549', []):
+        m = re.match(r"'([\w.]+?)(?:<[^<>]*>)?(?:\([^)]*\))?' is a new virtual member in sealed type '([\w.]+)'", msg)
+        if not m:
+            continue
+        member_full, cls_full = m.group(1), m.group(2)
+        meth = member_full.split('.')[-1].split('<')[0]
+        if meth == cls_full.split('.')[-1]:
+            continue  # 构造器不能 override
+        path = os.path.join(root, f)
+        if not os.path.exists(path):
+            continue
+        s = open(path, encoding='utf-8', errors='ignore').read()
+        # 定位该成员声明行（含 virtual），virtual → override
+        pat = re.compile(
+            r'^(\s*(?:\[[^\]]*\]\s*)?(?:public|protected|internal)'
+            r'(?:\s+(?:static|sealed|extern|new|unsafe))*)\s+virtual(\s+)'
+            r'((?:[\w<>\[\],.?:]+?)\s+)?' + re.escape(meth) +
+            r'(\s*(?:<[^<>]*>)?\s*(?:\(|\{|=>))',
+            re.M)
+        new_s, cnt = pat.subn(r'\1 override\2\3' + meth + r'\4', s, count=1)
+        if cnt:
+            open(path, 'w', encoding='utf-8').write(new_s)
+            n += 1
+            print(f"  CS0549: {os.path.basename(f)}.{meth} virtual→override")
+    return n
+
+# ---------- CS0534：未实现引擎/基类 abstract 成员 ----------
+# 已有成员带 virtual（被误转）→ 改回 override；无成员 → 追加 override 默认实现
+def fix_cs0534():
+    n = 0
+    seen = set()
+    for f, ln, msg in by_code.get('CS0534', []):
+        m = re.match(r"'(\w+)' does not implement inherited abstract member '([\w.]+?)\.(\w+?)(<[^>]*>)?(\(.*\)|\.get|\.set)'", msg)
+        if not m:
+            continue
+        cls, base, mem = m.group(1), m.group(2), m.group(3)
+        tail = m.group(5) or ''
+        is_prop = tail in ('.get', '.set')
+        key = (cls, mem, is_prop)
+        if key in seen:
+            continue
+        seen.add(key)
+        path = os.path.join(root, f)
+        if not os.path.exists(path):
+            continue
+        s = open(path, encoding='utf-8', errors='ignore').read()
+        # 1) 成员已在（方法/属性），带 virtual → 改 override
+        pat = re.compile(
+            r'^(\s*(?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)'
+            r'(?:\s+(?:static|sealed|extern|new|unsafe))*)\s+virtual(\s+)'
+            r'((?:[\w<>\[\],.?:]+?)\s+)?' + re.escape(mem) +
+            r'(\s*(?:<[^<>]*>)?\s*(?:\(|\{|=>))',
+            re.M)
+        new_s, cnt = pat.subn(r'\1 override\2\3' + mem + r'\4', s, count=1)
+        if cnt:
+            open(path, 'w', encoding='utf-8').write(new_s)
+            n += 1
+            print(f"  CS0534: {os.path.basename(f)}.{mem} virtual→override（已有实现）")
+            continue
+        # 2) 成员已存在但无修饰（普通方法）→ 加 override（仅当方法名可定位）
+        if is_prop:
+            prop_any = re.search(r'\b' + re.escape(mem) + r'\s*(?:\{|=>|;)', s)
+            if prop_any:
+                # 属性已存在：普通形式（无 override/virtual 前缀）→ 加 override
+                prop_pat = re.compile(
+                    r'^(\s*(?:public|protected|internal|private)(?:\s+(?:static|sealed|extern|new|unsafe))*)\s+'
+                    r'((?!override\b|virtual\b|abstract\b|async\b|new\b|static\b|sealed\b)([\w<>\[\],.?:]+))\s+'
+                    + re.escape(mem) + r'\s*(\{|=>|;)', re.M)
+                mprop = prop_pat.search(s)
+                if mprop:
+                    typ = mprop.group(3)
+                    body = 'false' if typ in ('bool', 'System.Boolean') else f'default({typ})'
+                    ind = re.match(r'\s*', mprop.group(1)).group(0)
+                    decl = f'{ind}public override {typ} {mem} {{ get {{ return {body}; }} }}'
+                    new_s = prop_pat.sub(decl.replace('\\', '\\\\'), s, count=1)
+                    open(path, 'w', encoding='utf-8').write(new_s)
+                    n += 1
+                    print(f"  CS0534: {os.path.basename(f)}.{mem} 普通属性→override")
+                # 已是 override/virtual 形式 → 不动
+                continue
+            # 属性不存在 → 追加 override（keepWaiting 等常为 bool）
+            ins = _insert_in_class(path, s, cls, f'public override bool {mem} {{ get {{ return false; }} }}')
+            if ins:
+                n += 1
+                print(f"  CS0534: {os.path.basename(f)} 追加 override 属性 {mem}")
+            continue
+        # 方法：任何形式已存在？
+        meth_any = re.search(r'\b' + re.escape(mem) + r'\s*(?:<[^<>]*>)?\s*\(', s)
+        if not meth_any:
+            # 完全缺失 → 追加 override 默认实现（仅空参；返回类型未知用 void 兜底）
+            if tail.strip() == '()':
+                ins = _insert_in_class(path, s, cls, f'public override void {mem}() {{ }}')
+                if ins:
+                    n += 1
+                    print(f"  CS0534: {os.path.basename(f)} 追加 override {mem}()")
+            continue
+        # 存在但非 override/virtual 形式 → 加 override 修饰
+        meth_exists = re.search(
+            r'^\s*(?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)(?:\s+(?:static|sealed|extern|new|unsafe))*\s+(?!override\b|virtual\b)[^\n(){};=]*\b' + re.escape(mem) + r'\s*(?:<[^<>]*>)?\s*\(', s, re.M)
+        if meth_exists:
+            meth_pat = re.compile(
+                r'^(\s*(?:\[[^\]]*\]\s*)?(?:public|protected|internal|private)'
+                r'(?:\s+(?:static|sealed|extern|new|unsafe))*)(\s+)'
+                r'((?!override\b|virtual\b)(?:[\w<>\[\],.?:]+?)\s+)(' + re.escape(mem) + r'\s*(?:<[^<>]*>)?\s*\()',
+                re.M)
+            new_s, cnt = meth_pat.subn(r'\1 override\2\3\4', s, count=1)
+            if cnt:
+                open(path, 'w', encoding='utf-8').write(new_s)
+                n += 1
+                print(f"  CS0534: {os.path.basename(f)}.{mem} 普通方法→override")
+            continue
+        # 3) 完全缺失 → 追加 override 默认实现（仅支持空参方法；返回类型未知用 void/bool 兜底）
+        args_empty = tail.strip() == '()'
+        if args_empty:
+            ret = 'void'
+            body = '{ }'
+            decl = f'public override {ret} {mem}() {body}'
+            ins = _insert_in_class(path, s, cls, decl)
+            if ins:
+                n += 1
+                print(f"  CS0534: {os.path.basename(f)} 追加 override {mem}()")
+    return n
+
+def _insert_in_class(path, s, cls, decl):
+    """在类 cls 的类体开头插入一行 decl；成功返回 True 并写文件"""
+    cm = re.search(r'\bclass\s+' + re.escape(cls) + r'\b[^\{]*\{', s)
+    if not cm:
+        # 类声明与 { 分离（基类列表在下一行）
+        cm2 = re.search(r'\bclass\s+' + re.escape(cls) + r'\b[^\{]*\n[^\{]*\{', s)
+        if not cm2:
+            return False
+        cm = cm2
+    pos = cm.end()
+    # 缩进取类声明行缩进 + 4
+    line_start = s.rfind('\n', 0, cm.start()) + 1
+    indent = re.match(r'\s*', s[line_start:]).group(0) + '    '
+    new_s = s[:pos] + '\n' + indent + decl + s[pos:]
+    open(path, 'w', encoding='utf-8').write(new_s)
+    return True
+
+# ---------- CS0106：virtual 修饰符无效 → 删除该行的 virtual ----------
+def fix_cs0106():
+    n = 0
+    seen = set()
+    for f, ln, msg in by_code.get('CS0106', []):
+        key = (f, ln)
+        if key in seen:
+            continue
+        seen.add(key)
+        path = os.path.join(root, f)
+        if not os.path.exists(path):
+            continue
+        lines = open(path, encoding='utf-8', errors='ignore').read().split('\n')
+        # 报错行及其邻近（行号可能漂移）找含 virtual 的行
+        for d in (0, -1, 1, -2, 2):
+            idx = ln - 1 + d
+            if 0 <= idx < len(lines) and 'virtual' in lines[idx]:
+                lines[idx] = re.sub(r'\bvirtual\s+', '', lines[idx], count=1)
+                open(path, 'w', encoding='utf-8').write('\n'.join(lines))
+                n += 1
+                print(f"  CS0106: {os.path.basename(f)}:{idx+1} 删除 virtual")
+                break
+    return n
+
 # ---------- 执行 ----------
 # ---------- CS0115：基类方法缺 virtual（il2cpp 元数据无 virtual 信息，反编译丢失）----------
 CLASS_INDEX = None
@@ -255,6 +423,9 @@ if 'CS0426' in by_code: stats.append(('CS0426', fix_cs0426()))
 if 'CS0246' in by_code: stats.append(('CS0246', fix_cs0246()))
 if 'CS0115' in by_code: stats.append(('CS0115', fix_cs0115()))
 if 'CS0138' in by_code: stats.append(('CS0138', fix_cs0138()))
+if 'CS0549' in by_code: stats.append(('CS0549', fix_cs0549()))
+if 'CS0534' in by_code: stats.append(('CS0534', fix_cs0534()))
+if 'CS0106' in by_code: stats.append(('CS0106', fix_cs0106()))
 
 print(f"修复文件数: {len(fixed_files)}")
 for code, n in stats:

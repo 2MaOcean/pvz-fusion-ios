@@ -124,16 +124,28 @@ jobs:
             [ -f "$P/$n" ] && cp "$f" "$P/$n" && echo "replaced $n"
           done
           # 2) 预删将被真实包/第三方编译替代的 dummy DLL（保留 .meta 供 GUID 复用）
-          KEEP_META_LIST="Unity.RenderPipelines.Core.Runtime Unity.RenderPipelines.Universal.Runtime Unity.2D.Animation.Runtime Unity.2D.Common.Runtime Unity.2D.SpriteShape.Runtime Unity.2D.Tilemap.Extras Unity.TextMeshPro Unity.Collections Unity.Burst Unity.Burst.Unsafe Unity.Collections.LowLevel.ILSupport Unity.Mathematics Unity.VisualScripting.Core spine-csharp spine-unity UniTask SimpleFileBrowser.Runtime UnityEngine.UI Core"
+          KEEP_META_LIST="Unity.RenderPipelines.Core.Runtime Unity.RenderPipelines.Universal.Runtime Unity.2D.Animation.Runtime Unity.2D.Common.Runtime Unity.2D.SpriteShape.Runtime Unity.2D.Tilemap.Extras Unity.TextMeshPro Unity.Collections Unity.Burst Unity.Burst.Unsafe Unity.Collections.LowLevel.ILSupport Unity.Mathematics Unity.VisualScripting.Core spine-csharp spine-unity UniTask SimpleFileBrowser.Runtime UnityEngine.UI"
+          # 注意：Core 不预删 —— 累积包里的真实 Core.dll 必须代代相传，删了会导致 namespace Core 消失
           # Core 源码从 Assembly-CSharp 拆出（单独编译成真实 Core.dll，走两遍法拷回）
           S=ExportedProject/ExportedProject/Assets/Scripts/Assembly-CSharp
+          # 若 Core 源码双失（$S/Core 与 CoreSrc 都无 .cs），从原始包恢复
+          if [ ! -d "$S/Core" ] && [ -z "$(find ExportedProject/ExportedProject/Assets/CoreSrc -name '*.cs' 2>/dev/null | head -1)" ]; then
+            echo "Core 源码丢失，从原始包恢复..."
+            if [ ! -f ep-orig.tar.gz ]; then
+              curl -sfL -o ep-orig.tar.gz "https://github.com/${{ github.repository }}/releases/download/rebuild-41-stagea/exported-41.tar.gz"
+            fi
+            tar xzf ep-orig.tar.gz "ExportedProject/ExportedProject/Assets/Scripts/Assembly-CSharp/Core" 2>/dev/null || true
+          fi
           if [ -d "$S/Core" ]; then
             mkdir -p ExportedProject/ExportedProject/Assets/CoreSrc
             cp -R "$S/Core/"* ExportedProject/ExportedProject/Assets/CoreSrc/ 2>/dev/null || true
             rm -rf "$S/Core" "$S/Core.meta"
-            # SortingGroupRebuilder / RightMenu 反向依赖游戏代码（asmdef 无法引用 Assembly-CSharp），移除
-            rm -f ExportedProject/ExportedProject/Assets/CoreSrc/SortingGroupRebuilder.cs ExportedProject/ExportedProject/Assets/CoreSrc/SortingGroupRebuilder.cs.meta 2>/dev/null
-            rm -rf ExportedProject/ExportedProject/Assets/CoreSrc/RightMenu ExportedProject/ExportedProject/Assets/CoreSrc/RightMenu.meta 2>/dev/null
+            # SortingGroupRebuilder / RightMenu 反向依赖游戏代码（asmdef 无法引用 Assembly-CSharp），
+            # 移回 Assembly-CSharp 程序集（保留 namespace Core，游戏代码引用可解析）
+            mv -f ExportedProject/ExportedProject/Assets/CoreSrc/SortingGroupRebuilder.cs "$S/" 2>/dev/null || rm -f ExportedProject/ExportedProject/Assets/CoreSrc/SortingGroupRebuilder.cs
+            mv -f ExportedProject/ExportedProject/Assets/CoreSrc/SortingGroupRebuilder.cs.meta "$S/" 2>/dev/null || rm -f ExportedProject/ExportedProject/Assets/CoreSrc/SortingGroupRebuilder.cs.meta
+            mv -f ExportedProject/ExportedProject/Assets/CoreSrc/RightMenu "$S/" 2>/dev/null || rm -rf ExportedProject/ExportedProject/Assets/CoreSrc/RightMenu
+            mv -f ExportedProject/ExportedProject/Assets/CoreSrc/RightMenu.meta "$S/" 2>/dev/null || rm -f ExportedProject/ExportedProject/Assets/CoreSrc/RightMenu.meta
             # class Core 遮蔽 namespace Core（游戏作者命名冲突）→ 重命名类（namespace 不动）
             if grep -rl "class Core " ExportedProject/ExportedProject/Assets/CoreSrc/ >/dev/null 2>&1; then
               echo "发现 class Core 遮蔽命名空间，重命名为 CoreStatic"

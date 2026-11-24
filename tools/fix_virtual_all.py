@@ -160,29 +160,15 @@ for cls, meth, p in overrides:
     if has_member_upstream(cls, meth):
         stats['keep'] += 1
         continue
-    # 链上没有 → 反编译错加的 override → 删除关键字
-    src = get_src(p)
-    cur_cls = None
-    new_lines = []
-    changed = False
-    for line in src.split('\n'):
-        cm = re.search(r'\bclass\s+([A-Za-z_]\w*)', line)
-        if cm:
-            cur_cls = cm.group(1)
-        if cur_cls == cls and re.search(r'\boverride\s+', line) and re.search(
-                r'\boverride\s+(?:[\w<>\[\],.?:]+?)\s+' + re.escape(meth) + r'\b', line):
-            line = re.sub(r'\boverride\s+', 'virtual ', line, count=1)
-            changed = True
-            stats['del'] += 1
-        new_lines.append(line)
-    if changed:
-        srcs[p] = '\n'.join(new_lines)
-        written.add(p)
-    else:
-        stats['nofile'] += 1
+    # 链上没有同名（基类为引擎/第三方类或索引缺失）→ 保留 override 信任反编译源码；
+    # 若确实是错加的 override，编译会报 CS0115，由 fix_compile_errors.py 按错误删除。
+    # （v5：不再盲转 virtual —— 会破坏引擎 abstract 成员的实现，产生 CS0534）
+    stats['nofile'] += 1
 
+# has_member_upstream 可能给基类当场加了 virtual，落盘
 for p in written:
-    open(p, 'w', encoding='utf-8').write(srcs[p])
+    if p in srcs:
+        open(p, 'w', encoding='utf-8').write(srcs[p])
 
 # ---------- 4. 第三遍：abstract 类的 abstract 成员 → virtual + 默认实现 ----------
 # （派生类几十个未实现 abstract 属性/方法，改 virtual 给默认体一次清掉 CS0534）
