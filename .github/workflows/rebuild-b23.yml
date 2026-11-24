@@ -276,11 +276,12 @@ jobs:
           done
           cp -R /tmp/unitask-repo/src/UniTask/Assets/Plugins/UniTask/Runtime/* "$A/unitask/"
           find "$A/unitask" -name "*.asmdef*" -delete
-          # UnityWebRequest 段条件编译在 iOS 下被排除（UNITASK_WEBREQUEST_SUPPORT 未定义）→ 直接放宽条件
-          sed -i.bak 's/#if ENABLE_UNITYWEBREQUEST && (!UNITY_2019_1_OR_NEWER || UNITASK_WEBREQUEST_SUPPORT)/#if ENABLE_UNITYWEBREQUEST/' \
-            "$A/unitask/UnityAsyncExtensions.cs" 2>/dev/null || \
-            sed -i 's/#if ENABLE_UNITYWEBREQUEST && (!UNITY_2019_1_OR_NEWER || UNITASK_WEBREQUEST_SUPPORT)/#if ENABLE_UNITYWEBREQUEST/' \
-            "$A/unitask/UnityAsyncExtensions.cs"
+          # UnityWebRequest 段条件编译在 iOS 下被排除（UNITASK_WEBREQUEST_SUPPORT 未定义）→ 全目录放宽
+          grep -rl 'UNITASK_WEBREQUEST_SUPPORT' "$A/unitask/" 2>/dev/null | while read -r f; do
+            sed -i.bak 's/#if ENABLE_UNITYWEBREQUEST && (!UNITY_2019_1_OR_NEWER || UNITASK_WEBREQUEST_SUPPORT)/#if ENABLE_UNITYWEBREQUEST/' "$f" 2>/dev/null || \
+              sed -i 's/#if ENABLE_UNITYWEBREQUEST && (!UNITY_2019_1_OR_NEWER || UNITASK_WEBREQUEST_SUPPORT)/#if ENABLE_UNITYWEBREQUEST/' "$f"
+            rm -f "$f.bak"
+          done
           grep -n "ENABLE_UNITYWEBREQUEST" "$A/unitask/UnityAsyncExtensions.cs" | head -3
           # SimpleFileBrowser（正确路径：Plugins/SimpleFileBrowser 含全套 Prefabs/Resources）
           for TRY in 1 2 3; do
