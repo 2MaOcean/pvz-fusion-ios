@@ -367,7 +367,6 @@ jobs:
                   // dummy DLL 已全部清除，包源码与第三方源码保留在场，player build 会以
                   // player define 正常编译全部程序集，无需任何 DLL 拷贝/包移除。
                   BuildIOS();
-              }                  BuildIOS();
               }
               static void BuildIOS() {
                   var scenes = Directory.GetFiles("Assets", "*.unity", SearchOption.AllDirectories)
