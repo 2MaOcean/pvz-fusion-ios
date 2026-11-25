@@ -34,6 +34,19 @@ typedef struct {
 } UnityFeature;
 
 #define UNITY_MAX_FEATURES 8
+#define MEM_MAX_PATCHES 16
+
+// 内存补丁：直接地址/符号+offset(+一次解引用) 周期性写值
+typedef struct {
+    bool   enabled;
+    char   name[48];      // 标识（日志用）
+    char   symbol[96];    // 可选：dlsym 符号（拿函数/全局对象地址）
+    long   offset;        // 相对镜像基址/符号地址的偏移
+    bool   deref;         // 先解引用一次再 +field_offset（堆对象字段）
+    long   field_offset;  // 解引用后的字段偏移
+    int    size;          // 1/2/4/8 字节
+    long   value;         // 写入值
+} MemPatch;
 
 typedef struct {
     char image_keyword[64]; // 镜像名关键字，如 "PvZ"
@@ -46,6 +59,8 @@ typedef struct {
     UnityFeature unity[UNITY_MAX_FEATURES]; // il2cpp 反射功能表
     int  probe_count;                       // 字段探测类清单
     char probe_classes[8][64];              // 如 GameAPP / PlantData
+    int  mem_count;                         // 内存补丁数
+    MemPatch mem[MEM_MAX_PATCHES];          // 内存修改补丁表
 } TweakConfig;
 
 bool config_load(TweakConfig *cfg);       // 读 bundle 内 Offsets.plist，失败给默认值
@@ -65,6 +80,8 @@ bool      patch_code_bytes(uintptr_t addr, const void *data, size_t len);
 void mod_sun_tick(const TweakFeature *f, const char *image_keyword);
 void mod_coins_tick(const TweakFeature *f, const char *image_keyword);
 void mod_cooldown_apply(const TweakFeature *f, const char *image_keyword);
+void mod_mem_init(TweakConfig *cfg, const char *image_keyword);
+void mod_mem_tick(TweakConfig *cfg, const char *image_keyword);
 
 // ---- Unity il2cpp 反射模块 ----
 void *unity_worker(void *arg);   // arg: TweakConfig*（堆分配，内部释放）

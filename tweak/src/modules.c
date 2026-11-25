@@ -69,3 +69,60 @@ void mod_cooldown_apply(const TweakFeature *f, const char *image_keyword) {
         }
     }
 }
+
+// ---- 内存补丁表（mem 数组）：解析地址一次，周期性写值 ----
+typedef struct {
+    int      active;
+    uintptr_t addr;    // 最终地址（解析后缓存）
+    int      size;
+    long     value;
+} MemResolved;
+
+static MemResolved g_mem[MEM_MAX_PATCHES];
+static int g_mem_count = 0;
+static int g_mem_resolved = 0;
+
+static uintptr_t mem_resolve_patch(const MemPatch *mp, const char *image_keyword) {
+    uintptr_t addr = 0;
+    if (mp->symbol[0]) addr = (uintptr_t)mem_find_symbol(image_keyword, mp->symbol);
+    if (!addr && mp->offset) addr = mem_image_base(image_keyword) + mp->offset;
+    if (!addr) return 0;
+    if (mp->deref) {
+        uintptr_t obj = mem_deref(addr);
+        if (!obj) return 0;
+        addr = obj + (mp->field_offset ? mp->field_offset : 0);
+    }
+    return addr;
+}
+
+void mod_mem_init(TweakConfig *cfg, const char *image_keyword) {
+    g_mem_count = 0;
+    g_mem_resolved = 1;
+    for (int i = 0; i < cfg->mem_count && i < MEM_MAX_PATCHES; i++) {
+        MemPatch *mp = &cfg->mem[i];
+        if (!mp->enabled) continue;
+        uintptr_t a = mem_resolve_patch(mp, image_keyword);
+        TWEAK_LOG("mem[%d] %s: addr=%p size=%d value=%ld %s",
+                  i, mp->name, (void *)a, mp->size, mp->value,
+                  a ? "OK" : "(未解析,稍后重试)");
+        if (a) {
+            g_mem[g_mem_count].active = 1;
+            g_mem[g_mem_count].addr = a;
+            g_mem[g_mem_count].size = mp->size > 0 && mp->size <= 8 ? mp->size : 8;
+            g_mem[g_mem_count].value = mp->value;
+            g_mem_count++;
+        }
+    }
+    TWEAK_LOG("mem: %d patches active", g_mem_count);
+}
+
+void mod_mem_tick(TweakConfig *cfg, const char *image_keyword) {
+    if (!cfg->mem_count) return;
+    if (!g_mem_resolved) mod_mem_init(cfg, image_keyword);
+    for (int i = 0; i < g_mem_count; i++) {
+        MemResolved *m = &g_mem[i];
+        if (!m->active || !m->addr) continue;
+        long long v = (long long)m->value;
+        mem_patch(m->addr, &v, (size_t)m->size);
+    }
+}

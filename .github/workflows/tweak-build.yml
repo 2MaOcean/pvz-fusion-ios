@@ -1,0 +1,80 @@
+name: Tweak dylib 构建(修改器插件)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号(如 v0.4.0)'
+        default: 'v0.4.0'
+      publish:
+        description: '发布到 release(tweak-versions)'
+        default: 'true'
+
+env:
+  DYLIB: PvzFusionTweak.dylib
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 查看工具链
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+          which ldid || brew install ldid 2>&1 | tail -1
+
+      - name: 编译 dylib(arm64 + arm64e, iPhoneOS SDK)
+        run: |
+          set -x
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          cd tweak
+          clang -arch arm64 -arch arm64e \
+            -miphoneos-version-min=13.0 -isysroot "$SDK" \
+            -O2 -dynamiclib -Iinclude \
+            -o "build/${DYLIB}" \
+            src/tweak_main.c src/hook.c src/config.c src/modules.c src/unity_tweak.c \
+            -framework CoreFoundation
+          ls -la "build/${DYLIB}"
+          file "build/${DYLIB}"
+
+      - name: 伪签(ldid)
+        run: |
+          cd tweak
+          ldid -S "build/${DYLIB}"
+          ldid -S "build/${DYLIB}.debug" 2>/dev/null || true
+          codesign -dv "build/${DYLIB}" 2>&1 | head -3 || true
+
+      - name: 上传 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tweak-dylib
+          path: tweak/build/PvzFusionTweak.dylib
+          if-no-files-found: error
+
+      - name: 发布到 tweak-versions release
+        if: ${{ github.event.inputs.publish == 'true' }}
+        run: |
+          set -x
+          TOKEN="${{ secrets.GITHUB_TOKEN }}"
+          VER="${{ github.event.inputs.version }}"
+          curl -s -X POST -H "Authorization: token $TOKEN" \
+            https://api.github.com/repos/${{ github.repository }}/releases \
+            -d "{\"tag_name\":\"tweak-${VER}\",\"name\":\"PvzFusionTweak ${VER}\",\"body\":\"修改器 dylib(CI 构建)。注入方法见仓库 packaging/inject_dylib.py 与 make_ipa.sh。\"}" > /dev/null
+          REL=$(curl -s -H "Authorization: token $TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/tweak-${VER}" \
+            | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
+          OLD=$(curl -s -H "Authorization: token $TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/tweak-${VER}" \
+            | python3 -c "import json,sys;d=json.load(sys.stdin);a=[x for x in d.get('assets',[]) if x['name']=='${DYLIB}'];print(a[0]['id'] if a else '')")
+          [ -n "$OLD" ] && [ "$OLD" != "None" ] && curl -s -X DELETE -H "Authorization: token $TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/assets/$OLD" > /dev/null
+          curl -s -X POST -H "Authorization: token $TOKEN" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @tweak/build/${DYLIB} \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/$REL/assets?name=${DYLIB}" \
+            | python3 -c "import json,sys;d=json.load(sys.stdin);print('RELEASED:', d.get('name'), d.get('size'), d.get('message',''))"

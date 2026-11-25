@@ -206,5 +206,72 @@ bool config_load(TweakConfig *cfg) {
     }
 
     CFRelease(pl);
+    // mem: [{name?, symbol?, offset, deref?, field_offset?, size?, value, enabled?}, ...]
+    {
+        const void *vp = NULL;
+        ks = CFStringCreateWithCString(NULL, "mem", kCFStringEncodingUTF8);
+        if (CFDictionaryGetValueIfPresent(root, ks, &vp) && vp &&
+            CFGetTypeID(vp) == CFArrayGetTypeID()) {
+            CFArrayRef arr = (CFArrayRef)vp;
+            CFIndex n_items = CFArrayGetCount(arr);
+            for (CFIndex i = 0; i < n_items && cfg->mem_count < 16; i++) {
+                CFDictionaryRef item = (CFDictionaryRef)CFArrayGetValueAtIndex(arr, i);
+                if (!item || CFGetTypeID(item) != CFDictionaryGetTypeID()) continue;
+                MemPatch *mp = &cfg->mem[cfg->mem_count];
+                memset(mp, 0, sizeof(*mp));
+                mp->enabled = true;
+                mp->size = 8;
+                struct { const char *key; char *dst; size_t sz; } strs[] = {
+                    {"name", mp->name, sizeof(mp->name)},
+                    {"symbol", mp->symbol, sizeof(mp->symbol)},
+                };
+                for (unsigned u = 0; u < 2; u++) {
+                    CFStringRef k2 = CFStringCreateWithCString(NULL, strs[u].key, kCFStringEncodingUTF8);
+                    const void *v2 = NULL;
+                    if (CFDictionaryGetValueIfPresent(item, k2, &v2) && v2 &&
+                        CFGetTypeID(v2) == CFStringGetTypeID())
+                        CFStringGetCString((CFStringRef)v2, strs[u].dst, (CFIndex)strs[u].sz, kCFStringEncodingUTF8);
+                    CFRelease(k2);
+                }
+                struct { const char *key; long *dst; } nums[] = {
+                    {"offset", &mp->offset},
+                    {"field_offset", &mp->field_offset},
+                    {"size", (long *)&mp->size},
+                    {"value", &mp->value},
+                };
+                for (unsigned u = 0; u < 4; u++) {
+                    CFStringRef k2 = CFStringCreateWithCString(NULL, nums[u].key, kCFStringEncodingUTF8);
+                    const void *v2 = NULL;
+                    if (CFDictionaryGetValueIfPresent(item, k2, &v2) && v2 &&
+                        CFGetTypeID(v2) == CFNumberGetTypeID()) {
+                        SInt64 nn = 0; CFNumberGetValue((CFNumberRef)v2, kCFNumberSInt64Type, &nn);
+                        *nums[u].dst = (long)nn;
+                    } else if (v2 && CFGetTypeID(v2) == CFStringGetTypeID()) {
+                        char buf[32]; CFStringGetCString((CFStringRef)v2, buf, 32, kCFStringEncodingUTF8);
+                        *nums[u].dst = strtol(buf, NULL, 0);
+                    }
+                    CFRelease(k2);
+                }
+                {
+                    CFStringRef k2 = CFStringCreateWithCString(NULL, "deref", kCFStringEncodingUTF8);
+                    const void *v2 = NULL;
+                    if (CFDictionaryGetValueIfPresent(item, k2, &v2) && v2 &&
+                        CFGetTypeID(v2) == CFBooleanGetTypeID())
+                        mp->deref = CFBooleanGetValue((CFBooleanRef)v2);
+                    CFRelease(k2);
+                    k2 = CFStringCreateWithCString(NULL, "enabled", kCFStringEncodingUTF8);
+                    v2 = NULL;
+                    if (CFDictionaryGetValueIfPresent(item, k2, &v2) && v2 &&
+                        CFGetTypeID(v2) == CFBooleanGetTypeID())
+                        mp->enabled = CFBooleanGetValue((CFBooleanRef)v2);
+                    CFRelease(k2);
+                }
+                if (!mp->name[0]) snprintf(mp->name, sizeof(mp->name), "mem%d", cfg->mem_count);
+                cfg->mem_count++;
+            }
+        }
+        CFRelease(ks);
+    }
+
     return true;
 }

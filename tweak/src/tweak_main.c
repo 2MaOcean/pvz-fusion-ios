@@ -39,11 +39,14 @@ void *tweak_worker(void *arg) {
 
     // 一次性补丁类功能
     mod_cooldown_apply(&cfg->cooldown, cfg->image_keyword);
+    // 内存补丁表：先解析地址(场景未就绪时 tick 内自动重试)
+    mod_mem_init(cfg, cfg->image_keyword);
 
     // 周期性数值锁定
     for (;;) {
         mod_sun_tick(&cfg->sun, cfg->image_keyword);
         mod_coins_tick(&cfg->coins, cfg->image_keyword);
+        mod_mem_tick(cfg, cfg->image_keyword);
         usleep(cfg->poll_ms > 0 ? cfg->poll_ms * 1000 : 100000);
     }
 }
