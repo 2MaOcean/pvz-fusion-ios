@@ -394,19 +394,6 @@ jobs:
                       }
                       AssetDatabase.Refresh();
                       while (EditorApplication.isCompiling) System.Threading.Thread.Sleep(300);
-                      // 诊断:列出引用 UnityEditor 的 player 程序集(linker 崩源定位)
-                      try {
-                          foreach (var dll in Directory.GetFiles(saDir, "*.dll")) {
-                              try {
-                                  using (var ad = Mono.Cecil.AssemblyDefinition.ReadAssembly(dll)) {
-                                      bool refEd = false;
-                                      foreach (var r in ad.MainModule.AssemblyReferences)
-                                          if (r.Name != null && r.Name.StartsWith("UnityEditor")) { refEd = true; break; }
-                                      if (refEd) Debug.LogWarning("[CI] REFERENCES-EDITOR: " + Path.GetFileName(dll));
-                                  }
-                              } catch { }
-                          }
-                      } catch { }
                   }
                   BuildIOS();
               }
@@ -488,6 +475,8 @@ jobs:
           REL=$(curl -s -H "Authorization: token $TOKEN" https://api.github.com/repos/${{ github.repository }}/releases/tags/build-logs | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
           if [ -f unity_build.log ]; then
             grep -E "error CS|FINAL:|迭代 |Script Compilation Error|错误总数|STAT |\[CI\]" unity_build.log | tail -800 > /tmp/build_summary.txt
+            echo "=== 引用 UnityEditor 的程序集（linker 崩源诊断）===" >> /tmp/build_summary.txt
+            grep -l "UnityEditor.CoreModule" ExportedProject/ExportedProject/Library/ScriptAssemblies/*.dll 2>/dev/null >> /tmp/build_summary.txt || echo "(none)" >> /tmp/build_summary.txt
             echo "=== xcodebuild/app 阶段 ===" >> /tmp/build_summary.txt
             tail -60 unity_build.log >> /tmp/build_summary.txt
           else
