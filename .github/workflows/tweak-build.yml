@@ -33,6 +33,7 @@ jobs:
           set -x
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           cd tweak
+          mkdir -p build
           clang -arch arm64 -arch arm64e \
             -miphoneos-version-min=13.0 -isysroot "$SDK" -DUSING_SDK \
             -O2 -dynamiclib -Iinclude \
