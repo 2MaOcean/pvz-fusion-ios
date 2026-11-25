@@ -362,40 +362,12 @@ jobs:
                   "com.unity.visualscripting"
               };
               public static void PrepareAndBuild() {
-                  var saDir = "Library/ScriptAssemblies";
-                  var tmp = "/tmp/pkgdll";
-                  // 迭代轮次幂等：包已移除时跳过
-                  if (!Directory.Exists(tmp) || !File.Exists(Path.Combine(tmp, "Unity.Burst.dll"))) {
-                      Directory.CreateDirectory(tmp);
-                      foreach (var f in CopyList) {
-                          var src = Path.Combine(saDir, f);
-                          if (File.Exists(src)) { File.Copy(src, Path.Combine(tmp, f), true); Debug.Log("[CI] staged " + f); }
-                          else Debug.LogWarning("[CI] not in ScriptAssemblies: " + f);
-                      }
-                      // 关键顺序：先删源码目录 → 立即把真实 DLL 拷进 Plugins（防删包后断链、
-                      // 防 Refresh 触发的重编译因引用缺失而中止 executeMethod）→ 再删包
-                      if (Directory.Exists("Assets/ThirdParty")) Directory.Delete("Assets/ThirdParty", true);
-                      if (File.Exists("Assets/ThirdParty.meta")) File.Delete("Assets/ThirdParty.meta");
-                      if (Directory.Exists("Assets/CoreSrc")) Directory.Delete("Assets/CoreSrc", true);
-                      if (File.Exists("Assets/CoreSrc.meta")) File.Delete("Assets/CoreSrc.meta");
-                      foreach (var f in CopyList) {
-                          var src = Path.Combine(tmp, f);
-                          if (File.Exists(src)) { File.Copy(src, Path.Combine("Assets/Plugins", f), true); Debug.Log("[CI] copied " + f); }
-                          else Debug.LogWarning("[CI] not staged, skip copy: " + f);
-                      }
-                      // 移除包（此时源码已删、DLL 已在位，任何时点的重编译都有依赖可用）
-                      foreach (var pkg in PackagesToRemove) {
-                          try {
-                              var req = Client.Remove(pkg);
-                              var sw = System.Diagnostics.Stopwatch.StartNew();
-                              while (!req.IsCompleted && sw.Elapsed.TotalSeconds < 120) System.Threading.Thread.Sleep(200);
-                              Debug.Log("[CI] Remove " + pkg + ": " + req.Status + " (" + sw.Elapsed.TotalSeconds + "s)");
-                          } catch (System.Exception e) { Debug.LogWarning("[CI] Remove " + pkg + " err: " + e.Message); }
-                      }
-                      AssetDatabase.Refresh();
-                      while (EditorApplication.isCompiling) System.Threading.Thread.Sleep(300);
-                  }
+                  // 两遍法已废除：第一遍(Editor define)编译的 dll 含 UNITY_EDITOR 专属代码，
+                  // 拷进 Plugins 给 player 用会让 UnityLinker 解析 UnityEditor.CoreModule 崩溃。
+                  // dummy DLL 已全部清除，包源码与第三方源码保留在场，player build 会以
+                  // player define 正常编译全部程序集，无需任何 DLL 拷贝/包移除。
                   BuildIOS();
+              }                  BuildIOS();
               }
               static void BuildIOS() {
                   var scenes = Directory.GetFiles("Assets", "*.unity", SearchOption.AllDirectories)
