@@ -33,7 +33,13 @@
 	<key>unity_probe</key>
 	<array>
 		<string>GameAPP</string>
+		<string>Board</string>
+		<string>CardSlot</string>
+		<string>SeedBank</string>
+		<string>BoardData</string>
+		<string>LevelData</string>
 		<string>PlantData</string>
+		<string>CardUI</string>
 	</array>
 	<key>unity</key>
 	<array>
