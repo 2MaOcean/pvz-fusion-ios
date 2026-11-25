@@ -8,7 +8,16 @@
 #include <stddef.h>
 #include <stdbool.h>   // 编译器自带头，不依赖 libc
 
-// ---- libc 子集（libSystem 导出） ----
+#ifdef USING_SDK
+// CI/macOS SDK 构建：直接用 SDK 的系统头
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <dlfcn.h>
+#include <unistd.h>
+#include <mach/mach.h>
+#else
+// ---- libc 子集（libSystem 导出，no-SDK 手写声明） ----
 typedef struct __sFILE FILE;
 extern FILE *stderr;
 extern int fprintf(FILE *, const char *, ...);
@@ -68,7 +77,9 @@ extern void sys_icache_invalidate(void *start, size_t len);
 #define VM_PROT_EXECUTE 0x04
 #define VM_PROT_COPY    0x10
 
-// ---- dyld API ----
+#endif // USING_SDK
+
+// ---- dyld API（两环境通用） ----
 extern uint32_t _dyld_image_count(void);
 extern const char *_dyld_get_image_name(uint32_t image_index);
 extern const void *_dyld_get_image_header(uint32_t image_index);
