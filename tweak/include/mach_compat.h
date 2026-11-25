@@ -15,6 +15,7 @@
 #include <string.h>
 #include <dlfcn.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <mach/mach.h>
 #else
 // ---- libc 子集（libSystem 导出，no-SDK 手写声明） ----
