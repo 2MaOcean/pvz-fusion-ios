@@ -23,12 +23,14 @@ typedef struct {
 
 // ---- Unity il2cpp 反射功能（Unity 版基座专用） ----
 typedef struct {
-    char klass[64];      // 类名，如 GameAPP
+    char klass[64];      // 类名，如 GameAPP / Board
     char ns[64];         // 命名空间，通常空
-    char field[64];      // 静态字段名，如 Sun
-    char type[16];       // int / float / bool
+    char field[64];      // 字段名，如 theMoneyCount / theSun
+    char type[16];       // int / float / bool / long
     char value_s[32];    // 目标值（字符串形式，运行时解析）
-    int  poll_ms;        // 锁定轮询，0=只写一次
+    int  poll_ms;        // 保留（v2 统一走 cfg->poll_ms tick）
+    char chain_holder[96]; // 实例链起点 "Class.field"（静态，如 GameAPP.board），空=纯静态
+    char chain_class[64];  // 实例链中转类名（如 Board，GetComponent(chain_class)）
 } UnityFeature;
 
 #define UNITY_MAX_FEATURES 8

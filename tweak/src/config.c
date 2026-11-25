@@ -173,8 +173,10 @@ bool config_load(TweakConfig *cfg) {
                     {"ns", cfg->unity[i].ns, 64},
                     {"field", cfg->unity[i].field, 64},
                     {"type", cfg->unity[i].type, 16},
+                    {"chain_holder", cfg->unity[i].chain_holder, 96},
+                    {"chain_class", cfg->unity[i].chain_class, 64},
                 };
-                for (unsigned u = 0; u < 4; u++) {
+                for (unsigned u = 0; u < 6; u++) {
                     CFStringRef k2 = CFStringCreateWithCString(NULL, strs[u].key, kCFStringEncodingUTF8);
                     const void *v2 = NULL;
                     if (CFDictionaryGetValueIfPresent(item, k2, &v2) && v2 &&

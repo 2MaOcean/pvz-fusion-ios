@@ -52,9 +52,30 @@
         <string>PlantData</string>
     </array>
 
-    <!-- unity: 反射锁定功能表（class.field → value） -->
+    <!-- unity: 反射锁定功能表（class.field → value）
+         静态字段直接写；实例字段配 chain_holder("类.静态字段"指向 GameObject)+chain_class(中转类) -->
     <key>unity</key>
     <array>
+        <dict>
+            <key>class</key><string>GameAPP</string>
+            <key>field</key><string>theMoneyCount</string>
+            <key>type</key><string>long</string>
+            <key>value</key><integer>999999</integer>
+        </dict>
+        <dict>
+            <key>class</key><string>Board</string>
+            <key>field</key><string>theSun</string>
+            <key>type</key><string>int</string>
+            <key>value</key><integer>9990</integer>
+            <key>chain_holder</key><string>GameAPP.board</string>
+            <key>chain_class</key><string>Board</string>
+        </dict>
+        <dict>
+            <key>class</key><string>GameAPP</string>
+            <key>field</key><string>developerMode</string>
+            <key>type</key><string>bool</string>
+            <key>value</key><integer>1</integer>
+        </dict>
         <dict>
             <key>class</key><string>GameAPP</string>
             <key>field</key><string>Sun</string>
