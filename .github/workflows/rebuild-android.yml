@@ -183,9 +183,15 @@ jobs:
           }
           mf = json.load(open("Packages/manifest.json"))
           mf["dependencies"].update(pkgs)
+          # 版本值清洗:非字符串值(反编译工程常见的 object)强制置为 1.0.0
+          bad = {k: v for k, v in mf["dependencies"].items() if not isinstance(v, str)}
+          for k in bad:
+              print("WARN: non-string version ->", k, "=", mf["dependencies"][k])
+              mf["dependencies"][k] = "1.0.0"
           json.dump(mf, open("Packages/manifest.json","w"), indent=2)
-          print("manifest updated", len(pkgs))
+          print("manifest updated", len(pkgs), "bad-fixed", len(bad))
           PY
+          cat Packages/manifest.json | head -40
           A=Assets/ThirdParty
           mkdir -p "$A/spine" "$A/unitask" "$A/sfb"
           for TRY in 1 2 3; do
