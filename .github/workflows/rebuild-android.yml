@@ -250,7 +250,8 @@ jobs:
                   // JDK 路径(runner Temurin 17;Unity 的 key 是 AndroidJdkRoot)
                   var jdk17 = System.Environment.GetEnvironmentVariable("JAVA_HOME_17_arm64");
                   if (!string.IsNullOrEmpty(jdk17)) {
-                      if (!jdk17.EndsWith("/Home")) jdk17 = jdk17.TrimEnd('/') + "/Home";
+                      jdk17 = jdk17.TrimEnd('/');
+                      if (!jdk17.EndsWith("/Home")) jdk17 = jdk17 + "/Home";
                       EditorPrefs.SetString("AndroidJdkRoot", jdk17);
                       EditorPrefs.SetString("JdkRoot", jdk17);
                       Debug.Log("[CI] AndroidJdkRoot=" + EditorPrefs.GetString("AndroidJdkRoot"));
