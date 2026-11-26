@@ -275,6 +275,7 @@ jobs:
         run: |
           set -x
           SDK=/Applications/Unity/PlaybackEngines/AndroidPlayer/SDK
+          sudo chown -R "$(whoami)" /Applications/Unity/PlaybackEngines/AndroidPlayer
           mkdir -p "$SDK/cmdline-tools"
           if [ ! -d "$SDK/cmdline-tools/latest" ]; then
             for i in 1 2 3; do
