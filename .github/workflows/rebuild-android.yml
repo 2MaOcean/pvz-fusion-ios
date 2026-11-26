@@ -16,25 +16,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 恢复 Unity 缓存(含 Android 支持)
+      - name: 恢复 Unity 缓存(复用 iOS 构建的编辑器缓存)
         id: unity
         uses: actions/cache@v4
         with:
           path: /Applications/Unity
-          key: unity-2022.3.62f1-arm64-android
+          key: unity-2022.3.62f1-arm64-ios
 
-      - name: 安装 Unity 2022.3.62f1 ARM64 + Android 支持
+      - name: 安装编辑器(仅缓存未命中时)
         if: steps.unity.outputs.cache-hit != 'true'
         run: |
           set -x
           BASE="https://download.unity3d.com/download_unity/${UNITY_CHANGESET}"
-          curl -sL -o /tmp/unity-editor.pkg "$BASE/MacEditorInstallerArm64/Unity-${UNITY_VERSION}.pkg"
+          for i in 1 2 3 4 5; do
+            curl -sL --retry 5 --retry-all-errors -C -               -o /tmp/unity-editor.pkg "$BASE/MacEditorInstallerArm64/Unity-${UNITY_VERSION}.pkg" && break
+            sleep 15
+          done
           sudo installer -pkg /tmp/unity-editor.pkg -target /
-          # Android Build Support(含 SDK/NDK/JDK)
-          curl -sL -o /tmp/android.tar.xz "$BASE/MacEditorTargetInstaller/UnitySetup-Android-Support-for-Editor-${UNITY_VERSION}.tar.xz"
+
+      - name: 安装 Android Build Support(编辑器在场即可)
+        run: |
+          set -x
+          if [ -d "/Applications/Unity/PlaybackEngines/AndroidPlayer" ]; then
+            echo "Android 支持已安装"; ls /Applications/Unity/PlaybackEngines/AndroidPlayer/ | head -3; exit 0
+          fi
+          [ -d "/Applications/Unity/Unity.app" ] || { echo "FATAL: Unity 编辑器不存在且缓存未命中"; exit 1; }
+          BASE="https://download.unity3d.com/download_unity/${UNITY_CHANGESET}"
+          for i in 1 2 3 4 5; do
+            curl -sL --retry 5 --retry-all-errors -C -               -o /tmp/android.tar.xz "$BASE/MacEditorTargetInstaller/UnitySetup-Android-Support-for-Editor-${UNITY_VERSION}.tar.xz" && break
+            sleep 15
+          done
           sudo mkdir -p /Applications/Unity/PlaybackEngines
           sudo tar xJf /tmp/android.tar.xz -C "/Applications/Unity/PlaybackEngines/" || {
-            curl -sL -o /tmp/android.pkg "$BASE/MacEditorTargetInstaller/UnitySetup-Android-Support-for-Editor-${UNITY_VERSION}.pkg"
+            for i in 1 2 3; do
+              curl -sL --retry 5 --retry-all-errors -C -                 -o /tmp/android.pkg "$BASE/MacEditorTargetInstaller/UnitySetup-Android-Support-for-Editor-${UNITY_VERSION}.pkg" && break
+              sleep 15
+            done
             sudo installer -pkg /tmp/android.pkg -target /; }
           ls /Applications/Unity/PlaybackEngines/AndroidPlayer/ | head -5
 
