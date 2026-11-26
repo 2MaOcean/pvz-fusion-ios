@@ -294,8 +294,10 @@ jobs:
           java -version 2>&1 | head -1
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" --licenses > /dev/null 2>&1 || true
           "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" "platform-tools" "platforms;android-33" "build-tools;33.0.2" > /dev/null 2>&1 || true
-          # Unity 的 JDK 检测也指向 17(BuildPlayer 时的 ListComponentsVersions 同样要 17)
-          defaults write com.unity3d.UnityEditor5.x JdkRoot "$JAVA_HOME" 2>/dev/null || true
+          # Unity 进程内嵌 OpenJDK 是 11(sdkmanager 要 17)→ 整个替换为 17 符号链接
+          sudo rm -rf /Applications/Unity/PlaybackEngines/AndroidPlayer/OpenJDK
+          sudo ln -sfn "$JAVA_HOME" /Applications/Unity/PlaybackEngines/AndroidPlayer/OpenJDK
+          "/Applications/Unity/PlaybackEngines/AndroidPlayer/OpenJDK/bin/java" -version 2>&1 | head -1
           ls "$SDK" | head -8
 
       - name: 修复-构建迭代循环(Android,20 轮)
