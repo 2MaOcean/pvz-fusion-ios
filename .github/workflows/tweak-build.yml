@@ -39,7 +39,7 @@ jobs:
             -O2 -dynamiclib -Iinclude \
             -o "build/${DYLIB}" \
             src/tweak_main.c src/hook.c src/config.c src/modules.c src/unity_tweak.c src/menu.m \
-            -framework CoreFoundation -framework UIKit -framework Foundation -lobjc
+            -framework CoreFoundation -framework UIKit -framework Foundation -framework CoreGraphics -lobjc
           ls -la "build/${DYLIB}"
           file "build/${DYLIB}"
 
