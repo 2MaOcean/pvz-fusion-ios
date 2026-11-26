@@ -247,6 +247,14 @@ jobs:
           using System.IO;
           public static class CIPrepareAndroid {
               public static void PrepareAndBuild() {
+                  // JDK 路径(runner Temurin 17;Unity 的 key 是 AndroidJdkRoot)
+                  var jdk17 = System.Environment.GetEnvironmentVariable("JAVA_HOME_17_arm64");
+                  if (!string.IsNullOrEmpty(jdk17)) {
+                      if (!jdk17.EndsWith("/Home")) jdk17 = jdk17.TrimEnd('/') + "/Home";
+                      EditorPrefs.SetString("AndroidJdkRoot", jdk17);
+                      EditorPrefs.SetString("JdkRoot", jdk17);
+                      Debug.Log("[CI] AndroidJdkRoot=" + EditorPrefs.GetString("AndroidJdkRoot"));
+                  }
                   // 不配置 keystore:Unity 对未指定签名的 Android build 自动使用 debug 签名
                   PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel24;
                   // il2cpp 必须显式指定目标架构(否则 "Target architecture not specified")
@@ -301,8 +309,10 @@ jobs:
           # 同时设置 Unity 的 JDK 路径(EditorPrefs)——确保以 /Home 结尾
           JDK17="${JAVA_HOME%/}"
           [[ "$JDK17" != */Home ]] && JDK17="$JDK17/Home"
+          defaults write com.unity3d.UnityEditor5.x AndroidJdkRoot "$JDK17"
           defaults write com.unity3d.UnityEditor5.x JdkRoot "$JDK17"
-          defaults read com.unity3d.UnityEditor5.x JdkRoot
+          defaults write com.unity3d.UnityEditor5.x AndroidSdkRoot "$SDK"
+          defaults read com.unity3d.UnityEditor5.x AndroidJdkRoot
           "/Applications/Unity/PlaybackEngines/AndroidPlayer/OpenJDK/bin/java" -version 2>&1 | head -1
           ls "$SDK" | head -8
 
