@@ -297,9 +297,9 @@ jobs:
           # Unity 进程内嵌 OpenJDK 是 11(sdkmanager 要 17)→ 整个替换为 17 符号链接
           sudo rm -rf /Applications/Unity/PlaybackEngines/AndroidPlayer/OpenJDK
           # mac JDK 布局:arm64/Contents/Home → Unity 期望 OpenJDK/Contents/Home,指向 arm64 层
-          sudo ln -sfn "$(dirname "$JAVA_HOME")" /Applications/Unity/PlaybackEngines/AndroidPlayer/OpenJDK
+          sudo ln -sfn "$(dirname "${JAVA_HOME%/}")" /Applications/Unity/PlaybackEngines/AndroidPlayer/OpenJDK
           # 同时设置 Unity 的 JDK 路径(EditorPrefs)——确保以 /Home 结尾
-          JDK17="$JAVA_HOME"
+          JDK17="${JAVA_HOME%/}"
           [[ "$JDK17" != */Home ]] && JDK17="$JDK17/Home"
           defaults write com.unity3d.UnityEditor5.x JdkRoot "$JDK17"
           defaults read com.unity3d.UnityEditor5.x JdkRoot
