@@ -121,5 +121,19 @@
 			<false/>
 		</dict>
 	</array>
+	<key>seed_pool_all</key>
+	<true/>
+	<key>place_on_mouse</key>
+	<false/>
+	<key>place_plant_type</key>
+	<integer>0</integer>
+	<key>save_flush_ms</key>
+	<integer>60000</integer>
+	<key>jump_mode</key>
+	<string>IZ</string>
+	<key>jump_level</key>
+	<integer>1</integer>
+	<key>jump_delay_ms</key>
+	<integer>30000</integer>
 </dict>
 </plist>

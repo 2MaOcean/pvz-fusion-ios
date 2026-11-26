@@ -128,22 +128,62 @@ static void probe_class(void *image, const char *name) {
     TWEAK_LOG("===== probe %s end (%d fields) =====", name, count);
 }
 
+// ---- v0.5 runtime_invoke 设施 ----
+static void *(*p_value_box)(void *, void *);   // il2cpp_value_box(klass, data)
+
+// System 基本类型缓存
+static void *k_int32, *k_int64, *k_boolean, *k_single, *k_string_klass;
+
+static void init_system_types(void *image) {
+    k_int32    = p_class_from_name(image, "System", "Int32");
+    k_int64    = p_class_from_name(image, "System", "Int64");
+    k_boolean  = p_class_from_name(image, "System", "Boolean");
+    k_single   = p_class_from_name(image, "System", "Single");
+    k_string_klass = p_class_from_name(image, "System", "String");
+    p_value_box = dlsym(RTLD_DEFAULT, "il2cpp_value_box");
+    TWEAK_LOG("invoke: sys types %s", (k_int32 && p_value_box) ? "ok" : "partial");
+}
+
+static void *box_i(int v)    { return p_value_box ? p_value_box(k_int32, &v) : NULL; }
+static void *box_l(long long v) { return p_value_box ? p_value_box(k_int64, &v) : NULL; }
+static void *box_b(unsigned char v) { return p_value_box ? p_value_box(k_boolean, &v) : NULL; }
+static void *box_f(float v)  { return p_value_box ? p_value_box(k_single, &v) : NULL; }
+
+static void *invoke_static_nm(void *image, const char *cls, const char *meth,
+                              void **args, int argc) {
+    void *k = p_class_from_name(image, "", cls);
+    if (!k) { TWEAK_LOG("invoke: class %s not found", cls); return NULL; }
+    void *m = p_class_get_method_from_name(k, meth, argc);
+    if (!m) { TWEAK_LOG("invoke: %s.%s/%d not found", cls, meth, argc); return NULL; }
+    void *exc = NULL;
+    void *r = p_runtime_invoke(m, NULL, args, &exc);
+    if (exc) TWEAK_LOG("invoke: %s.%s exception", cls, meth);
+    return r;
+}
+
+static void *invoke_instance_nm(void *obj, void *klass, const char *meth,
+                                void **args, int argc) {
+    if (!obj || !klass) return NULL;
+    void *m = p_class_get_method_from_name(klass, meth, argc);
+    if (!m) return NULL;
+    void *exc = NULL;
+    return p_runtime_invoke(m, obj, args, &exc);
+}
+
 // ---- 已解析特性(启动时解析一次,tick 时直接写) ----
 typedef struct {
     int      active;
-    void    *field;        // 目标字段
+    void    *field;
     int      is_static;
     int      type_kind;    // 0=int 1=float 2=bool 3=long
     long     target;
-    // 实例链(可选): holder 静态字段 → GameObject → GetComponent(chain_type) → instance.field
-    void    *holder_static_field;   // GameAPP.board
-    void    *chain_method;          // GameObject.GetComponent(Type)
-    void    *chain_type_obj;        // System.Type 实例(Board)
+    void    *holder_static_field;
+    void    *chain_method;
+    void    *chain_type_obj;
 } ResolvedFeature;
 
 static ResolvedFeature g_feats[UNITY_MAX_FEATURES];
 static int g_feat_count = 0;
-static int g_tick_ms = 300;
 
 static void resolve_feature(void *image, UnityFeature *uf, ResolvedFeature *rf) {
     memset(rf, 0, sizeof(*rf));
@@ -160,31 +200,26 @@ static void resolve_feature(void *image, UnityFeature *uf, ResolvedFeature *rf) 
                     strcmp(uf->type, "long") == 0 ? 3 : 0;
     rf->active = 1;
 
-    // 实例字段:走 holder 静态字段链(uf->chain_holder="GameAPP.board", chain_class="Board")
     if (!rf->is_static && uf->chain_holder[0] && uf->chain_class[0]) {
         char hcls[64] = {0}, hfld[64] = {0};
         char *dot = strchr(uf->chain_holder, '.');
-        if (!dot) { TWEAK_LOG("unity: chain_holder 需 Class.field 形式"); rf->active = 0; return; }
+        if (!dot) { rf->active = 0; return; }
         size_t cl = (size_t)(dot - uf->chain_holder);
         if (cl >= sizeof(hcls)) cl = sizeof(hcls) - 1;
         memcpy(hcls, uf->chain_holder, cl);
         snprintf(hfld, sizeof(hfld), "%s", dot + 1);
         void *hk = p_class_from_name(image, "", hcls);
-        if (!hk) { TWEAK_LOG("unity: chain holder class %s not found", hcls); rf->active = 0; return; }
-        rf->holder_static_field = p_class_get_field_from_name(hk, hfld);
-        if (!rf->holder_static_field) { TWEAK_LOG("unity: chain holder field %s not found", hfld); rf->active = 0; return; }
+        rf->holder_static_field = hk ? p_class_get_field_from_name(hk, hfld) : NULL;
         void *ck = p_class_from_name(image, "", uf->chain_class);
-        if (!ck) { TWEAK_LOG("unity: chain class %s not found", uf->chain_class); rf->active = 0; return; }
-        // GameObject.GetComponent(Type)(非泛型重载,1 参)
         void *gok = p_class_from_name(image, "UnityEngine", "GameObject");
-        if (!gok || !p_class_get_method_from_name || !p_runtime_invoke ||
-            !p_type_get_object || !p_class_get_type) {
-            TWEAK_LOG("unity: chain api incomplete"); rf->active = 0; return;
+        if (!rf->holder_static_field || !ck || !gok || !p_class_get_method_from_name ||
+            !p_runtime_invoke || !p_type_get_object || !p_class_get_type) {
+            TWEAK_LOG("unity: chain setup fail for %s.%s", uf->klass, uf->field);
+            rf->active = 0; return;
         }
         rf->chain_method = p_class_get_method_from_name(gok, "GetComponent", 1);
-        if (!rf->chain_method) { TWEAK_LOG("unity: GameObject.GetComponent(Type) not found"); rf->active = 0; return; }
         rf->chain_type_obj = p_type_get_object(p_class_get_type(ck));
-        if (!rf->chain_type_obj) { TWEAK_LOG("unity: chain type obj fail"); rf->active = 0; return; }
+        if (!rf->chain_method || !rf->chain_type_obj) { rf->active = 0; return; }
         TWEAK_LOG("unity: chain %s.%s via %s -> %s ready", uf->klass, uf->field, uf->chain_holder, uf->chain_class);
     }
     TWEAK_LOG("unity: feature %s.%s = %ld (%s%s)", uf->klass, uf->field, rf->target,
@@ -192,10 +227,8 @@ static void resolve_feature(void *image, UnityFeature *uf, ResolvedFeature *rf) 
               rf->is_static ? ", static" : ", instance");
 }
 
-// 单特性一次写
 static void tick_feature(ResolvedFeature *rf) {
     if (!rf->active || !rf->field) return;
-    void *obj = NULL;
     if (rf->is_static) {
         if (rf->type_kind == 1) { float v = (float)rf->target; p_field_static_set_value(rf->field, &v, &v); }
         else if (rf->type_kind == 2) { unsigned char v = rf->target ? 1 : 0; p_field_static_set_value(rf->field, &v, &v); }
@@ -203,24 +236,164 @@ static void tick_feature(ResolvedFeature *rf) {
         else { int v = (int)rf->target; p_field_static_set_value(rf->field, &v, &v); }
         return;
     }
-    // 实例链:holder 静态字段(GameObject)→ GetComponent → 实例
-    if (!rf->holder_static_field || !rf->chain_method || !rf->chain_type_obj) return;
-    obj = NULL;
+    void *obj = NULL;
     p_field_static_get_value(rf->holder_static_field, &obj);
-    if (!obj) return; // 场景未加载
+    if (!obj) return;
     void *exc = NULL;
     void *args[1] = { rf->chain_type_obj };
     void *comp = p_runtime_invoke(rf->chain_method, obj, args, &exc);
-    if (!comp || exc) return; // 无组件/异常
+    if (!comp || exc) return;
     if (rf->type_kind == 1) { float v = (float)rf->target; p_field_set_value(comp, rf->field, &v); }
     else if (rf->type_kind == 2) { unsigned char v = rf->target ? 1 : 0; p_field_set_value(comp, rf->field, &v); }
     else if (rf->type_kind == 3) { long long v = (long long)rf->target; p_field_set_value(comp, rf->field, &v); }
     else { int v = (int)rf->target; p_field_set_value(comp, rf->field, &v); }
 }
 
+// ---- v0.5 高阶动作:模式跳转 / 全卡池 / 任意放置 / 存档落盘 ----
+typedef struct {
+    int  active;
+    char mode[32];      // "IZ" / "adv" / "menu" / "treasure" / "tower" / "challenge"
+    int  level;
+    int  delay_ms;      // 主菜单就绪后延迟
+    int  done;
+} ModeJump;
+
+static ModeJump g_jump;
+static int g_seed_all = 0;      // Board.seedPool 塞满全植物
+static int g_place_on_mouse = 0;// 周期把指定植物放上鼠标
+static int g_place_planttype = 0;
+static int g_save_flush_ms = 0; // 定时 SavePlayerData
+
+// Board 实例(从 GameAPP.board 反射拿)
+static void *get_board_component(void *image, void *board_go, const char *comp_class) {
+    void *ck = p_class_from_name(image, "", comp_class);
+    void *gok = p_class_from_name(image, "UnityEngine", "GameObject");
+    if (!ck || !gok || !board_go) return NULL;
+    void *m = p_class_get_method_from_name(gok, "GetComponent", 1);
+    if (!m) return NULL;
+    void *tobj = p_type_get_object(p_class_get_type(ck));
+    if (!tobj) return NULL;
+    void *exc = NULL;
+    void *args[1] = { tobj };
+    return p_runtime_invoke(m, board_go, args, &exc);
+}
+
+static void do_seed_all(void *image, void *board_go) {
+    // Board.seedPool (List<PlantType>) 塞入 PlantType 枚举全值
+    void *board = get_board_component(image, board_go, "Board");
+    if (!board) return;
+    void *bk = p_class_from_name(image, "", "Board");
+    void *fld = p_class_get_field_from_name(bk, "seedPool");
+    if (!fld) { TWEAK_LOG("seed_all: Board.seedPool not found"); return; }
+    void *list = NULL;
+    p_field_get_value(board, fld, &list);
+    if (!list) { TWEAK_LOG("seed_all: seedPool null"); return; }
+    void *list_k = p_class_from_name(image, "System.Collections.Generic", "List`1");
+    void *add = list_k ? p_class_get_method_from_name(list_k, "Add", 1) : NULL;
+    // 泛型 List 的 Add 通过实例方法可能查不到(开放泛型),退回 runtime_invoke 按 obj 的实际类
+    if (!add) {
+        void *obj_k = p_class_from_name(image, "", "Board");
+        (void)obj_k;
+        // 用对象自身类的方法表:il2cpp_object_get_class
+        void *(*obj_get_class)(void *) = dlsym(RTLD_DEFAULT, "il2cpp_object_get_class");
+        if (obj_get_class) {
+            void *real_k = obj_get_class(list);
+            add = p_class_get_method_from_name(real_k, "Add", 1);
+        }
+    }
+    if (!add) { TWEAK_LOG("seed_all: List.Add not found"); return; }
+    void *pt_k = p_class_from_name(image, "", "PlantType");
+    if (!pt_k) { TWEAK_LOG("seed_all: PlantType not found"); return; }
+    void *m_getnames = p_class_get_method_from_name(pt_k, "GetNames", 0);
+    (void)m_getnames;
+    // 枚举范围:PlantsVsZombiesRH PlantType 值域 0..~300;直接 0..299 塞入
+    int added = 0;
+    for (int v = 0; v < 300; v++) {
+        void *boxed = p_value_box(pt_k, &v);
+        if (!boxed) break;
+        void *exc = NULL;
+        void *args[1] = { boxed };
+        p_runtime_invoke(add, list, args, &exc);
+        if (!exc) added++;
+    }
+    TWEAK_LOG("seed_all: added %d plants to seedPool", added);
+    g_seed_all = 0; // 一次即可
+}
+
+static void do_place_on_mouse(void *image, void *board_go) {
+    void *mouse = get_board_component(image, board_go, "Mouse");
+    if (!mouse) return;
+    void *mk = p_class_from_name(image, "", "Mouse");
+    void *m = p_class_get_method_from_name(mk, "CreatePlantOnMouse", 1);
+    if (!m) { TWEAK_LOG("place: Mouse.CreatePlantOnMouse not found"); g_place_on_mouse = 0; return; }
+    void *pt_k = p_class_from_name(image, "", "PlantType");
+    void *boxed = p_value_box ? p_value_box(pt_k, &g_place_planttype) : NULL;
+    if (!boxed) return;
+    void *exc = NULL;
+    void *args[1] = { boxed };
+    p_runtime_invoke(m, mouse, args, &exc);
+    if (exc) { TWEAK_LOG("place: exception"); }
+}
+
+static void do_save_flush(void *image) {
+    // SaveInfo.Instance(静态字段)→ SavePlayerData()
+    void *si_k = p_class_from_name(image, "", "SaveInfo");
+    if (!si_k) return;
+    void *inst_f = p_class_get_field_from_name(si_k, "Instance");
+    if (!inst_f) return;
+    void *inst = NULL;
+    p_field_static_get_value(inst_f, &inst);
+    if (!inst) return;
+    void *m = p_class_get_method_from_name(si_k, "SavePlayerData", 0);
+    if (!m) { TWEAK_LOG("save: SavePlayerData not found"); return; }
+    void *exc = NULL;
+    p_runtime_invoke(m, inst, NULL, &exc);
+    TWEAK_LOG("save: SavePlayerData invoked");
+}
+
+static void do_mode_jump(void *image) {
+    void *uimgr_k = p_class_from_name(image, "", "UIMgr");
+    if (!uimgr_k) { TWEAK_LOG("jump: UIMgr not found"); return; }
+    void *exc = NULL;
+    if (strcmp(g_jump.mode, "IZ") == 0) {
+        void *m = p_class_get_method_from_name(uimgr_k, "EnterIZGame", 3);
+        if (m) {
+            void *a[3] = { box_i(g_jump.level), box_i(0), box_i(0) };
+            // name 参数是 string:传 NULL(默认 null)——占位用 box_i 不对;直接 3 参:string=null
+            void *args3[3] = { box_i(g_jump.level), NULL, NULL };
+            p_runtime_invoke(m, NULL, args3, &exc);
+        }
+    } else if (strcmp(g_jump.mode, "adv") == 0) {
+        void *m = p_class_get_method_from_name(uimgr_k, "EnterGame", 4);
+        if (m) {
+            void *lt_k = p_class_from_name(image, "", "LevelType");
+            int lt = 0; // Advanture
+            void *args4[4] = { p_value_box(lt_k, &lt), box_i(g_jump.level), box_i(0), NULL };
+            p_runtime_invoke(m, NULL, args4, &exc);
+        }
+    } else if (strcmp(g_jump.mode, "menu") == 0) {
+        void *m = p_class_get_method_from_name(uimgr_k, "EnterMainMenu", 0);
+        if (m) p_runtime_invoke(m, NULL, NULL, &exc);
+    } else if (strcmp(g_jump.mode, "treasure") == 0) {
+        void *m = p_class_get_method_from_name(uimgr_k, "EnterTreasureMenu", 0);
+        if (m) p_runtime_invoke(m, NULL, NULL, &exc);
+    } else if (strcmp(g_jump.mode, "tower") == 0) {
+        void *m = p_class_get_method_from_name(uimgr_k, "EnterTowerMenu", 0);
+        if (m) p_runtime_invoke(m, NULL, NULL, &exc);
+    } else if (strcmp(g_jump.mode, "challenge") == 0) {
+        void *m = p_class_get_method_from_name(uimgr_k, "EnterChallengeMenu", 0);
+        if (m) p_runtime_invoke(m, NULL, NULL, &exc);
+    } else if (strcmp(g_jump.mode, "izmenu") == 0) {
+        void *m = p_class_get_method_from_name(uimgr_k, "EnterIZMenu", 0);
+        if (m) p_runtime_invoke(m, NULL, NULL, &exc);
+    }
+    TWEAK_LOG("jump: %s(%d) %s", g_jump.mode, g_jump.level, exc ? "exception" : "invoked");
+    g_jump.done = 1;
+}
+
 void *unity_worker(void *arg) {
     TweakConfig *cfg = arg;
-    for (int i = 0; i < 1800 && !api_ready(); i++) { // 最多 180s
+    for (int i = 0; i < 1800 && !api_ready(); i++) {
         usleep(100000);
         if (!p_domain_get && !resolve_api()) continue;
     }
@@ -243,7 +416,9 @@ void *unity_worker(void *arg) {
         return NULL;
     }
 
-    // 解析全部特性
+    init_system_types(image);
+
+    // 解析全部锁定特性
     for (int fi = 0; fi < UNITY_MAX_FEATURES; fi++) {
         UnityFeature *uf = &cfg->unity[fi];
         if (!uf->klass[0] || !uf->field[0]) continue;
@@ -251,12 +426,53 @@ void *unity_worker(void *arg) {
         resolve_feature(image, uf, &g_feats[g_feat_count]);
         if (g_feats[g_feat_count].active) g_feat_count++;
     }
-    if (g_feat_count == 0) { TWEAK_LOG("unity: no active features, worker exit"); free(cfg); return NULL; }
-    TWEAK_LOG("unity: %d features active, tick=%dms", g_feat_count,
-              cfg->poll_ms > 0 ? cfg->poll_ms : 300);
+    TWEAK_LOG("unity: %d features active", g_feat_count);
 
+    // v0.5 动作配置
+    g_seed_all = cfg->seed_pool_all;
+    g_place_on_mouse = cfg->place_on_mouse;
+    g_place_planttype = cfg->place_plant_type;
+    g_save_flush_ms = cfg->save_flush_ms;
+    if (cfg->jump_mode[0]) {
+        snprintf(g_jump.mode, sizeof(g_jump.mode), "%s", cfg->jump_mode);
+        g_jump.level = cfg->jump_level;
+        g_jump.delay_ms = cfg->jump_delay_ms > 0 ? cfg->jump_delay_ms : 30000;
+        g_jump.done = 0;
+    }
+
+    long long t0 = 0;
+    long long place_t0 = 0;
+    long long save_t0 = 0;
     for (;;) {
         for (int i = 0; i < g_feat_count; i++) tick_feature(&g_feats[i]);
+
+        void *domain = p_domain_get();
+        void *board_go = NULL;
+        if (domain) {
+            void *gapp = p_class_from_name(image, "", "GameAPP");
+            void *bf = gapp ? p_class_get_field_from_name(gapp, "board") : NULL;
+            if (bf) p_field_static_get_value(bf, &board_go);
+        }
+
+        // 模式跳转(延迟执行)
+        if (g_jump.mode[0] && !g_jump.done) {
+            long long now = t0 += (cfg->poll_ms > 0 ? cfg->poll_ms : 300);
+            (void)now;
+            if (t0 >= g_jump.delay_ms) { do_mode_jump(image); }
+        }
+        // 全卡池(board 就绪后)
+        if (g_seed_all && board_go) { do_seed_all(image, board_go); }
+        // 任意放置(周期把植物放上鼠标)
+        if (g_place_on_mouse && board_go) {
+            place_t0 += (cfg->poll_ms > 0 ? cfg->poll_ms : 300);
+            if (place_t0 >= 2000) { do_place_on_mouse(image, board_go); place_t0 = 0; }
+        }
+        // 存档落盘
+        if (g_save_flush_ms > 0) {
+            save_t0 += (cfg->poll_ms > 0 ? cfg->poll_ms : 300);
+            if (save_t0 >= g_save_flush_ms) { do_save_flush(image); save_t0 = 0; }
+        }
+
         int pm = cfg->poll_ms > 0 ? cfg->poll_ms : 300;
         usleep(pm * 1000);
     }

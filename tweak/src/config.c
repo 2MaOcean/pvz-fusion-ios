@@ -273,5 +273,47 @@ bool config_load(TweakConfig *cfg) {
         CFRelease(ks);
     }
 
+    // v0.5 高阶动作
+    {
+        CFStringRef k2;
+        const void *v2 = NULL;
+        k2 = CFStringCreateWithCString(NULL, "seed_pool_all", kCFStringEncodingUTF8);
+        if (CFDictionaryGetValueIfPresent(root, k2, &v2) && v2 && CFGetTypeID(v2) == CFBooleanGetTypeID())
+            cfg->seed_pool_all = CFBooleanGetValue((CFBooleanRef)v2) ? 1 : 0;
+        CFRelease(k2);
+        k2 = CFStringCreateWithCString(NULL, "place_on_mouse", kCFStringEncodingUTF8);
+        if (CFDictionaryGetValueIfPresent(root, k2, &v2) && v2 && CFGetTypeID(v2) == CFBooleanGetTypeID())
+            cfg->place_on_mouse = CFBooleanGetValue((CFBooleanRef)v2) ? 1 : 0;
+        CFRelease(k2);
+        k2 = CFStringCreateWithCString(NULL, "place_plant_type", kCFStringEncodingUTF8);
+        if (CFDictionaryGetValueIfPresent(root, k2, &v2) && v2 && CFGetTypeID(v2) == CFNumberGetTypeID()) {
+            SInt64 nn = 0; CFNumberGetValue((CFNumberRef)v2, kCFNumberSInt64Type, &nn);
+            cfg->place_plant_type = (int)nn;
+        }
+        CFRelease(k2);
+        k2 = CFStringCreateWithCString(NULL, "save_flush_ms", kCFStringEncodingUTF8);
+        if (CFDictionaryGetValueIfPresent(root, k2, &v2) && v2 && CFGetTypeID(v2) == CFNumberGetTypeID()) {
+            SInt64 nn = 0; CFNumberGetValue((CFNumberRef)v2, kCFNumberSInt64Type, &nn);
+            cfg->save_flush_ms = (int)nn;
+        }
+        CFRelease(k2);
+        k2 = CFStringCreateWithCString(NULL, "jump_mode", kCFStringEncodingUTF8);
+        if (CFDictionaryGetValueIfPresent(root, k2, &v2) && v2 && CFGetTypeID(v2) == CFStringGetTypeID())
+            CFStringGetCString((CFStringRef)v2, cfg->jump_mode, sizeof(cfg->jump_mode), kCFStringEncodingUTF8);
+        CFRelease(k2);
+        k2 = CFStringCreateWithCString(NULL, "jump_level", kCFStringEncodingUTF8);
+        if (CFDictionaryGetValueIfPresent(root, k2, &v2) && v2 && CFGetTypeID(v2) == CFNumberGetTypeID()) {
+            SInt64 nn = 0; CFNumberGetValue((CFNumberRef)v2, kCFNumberSInt64Type, &nn);
+            cfg->jump_level = (int)nn;
+        }
+        CFRelease(k2);
+        k2 = CFStringCreateWithCString(NULL, "jump_delay_ms", kCFStringEncodingUTF8);
+        if (CFDictionaryGetValueIfPresent(root, k2, &v2) && v2 && CFGetTypeID(v2) == CFNumberGetTypeID()) {
+            SInt64 nn = 0; CFNumberGetValue((CFNumberRef)v2, kCFNumberSInt64Type, &nn);
+            cfg->jump_delay_ms = (int)nn;
+        }
+        CFRelease(k2);
+    }
+
     return true;
 }

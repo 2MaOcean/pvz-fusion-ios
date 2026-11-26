@@ -61,6 +61,14 @@ typedef struct {
     char probe_classes[8][64];              // 如 GameAPP / PlantData
     int  mem_count;                         // 内存补丁数
     MemPatch mem[MEM_MAX_PATCHES];          // 内存修改补丁表
+    // v0.5 高阶动作
+    int  seed_pool_all;                     // Board.seedPool 塞满全植物(任意选卡)
+    int  place_on_mouse;                    // 周期把指定植物放上鼠标(任意放置)
+    int  place_plant_type;                  // 放置的 PlantType
+    int  save_flush_ms;                     // 定时 SavePlayerData 落盘(0=关)
+    char jump_mode[32];                     // 模式跳转: IZ/adv/menu/treasure/tower/challenge/izmenu
+    int  jump_level;                        // 跳转关卡号
+    int  jump_delay_ms;                     // 跳转延迟(等主菜单就绪)
 } TweakConfig;
 
 bool config_load(TweakConfig *cfg);       // 读 bundle 内 Offsets.plist，失败给默认值
