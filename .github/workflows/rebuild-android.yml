@@ -123,7 +123,7 @@ jobs:
           rm -f "$P/__Generated.dll" "$P/__Generated.dll.meta" "$P/System.Runtime.CompilerServices.Unsafe.dll" "$P/System.Runtime.CompilerServices.Unsafe.dll.meta"
           rm -f "$P/Core.dll" "$P/Unity.MemoryProfiler.dll" "$P/Unity.InternalAPIEngineBridge.001.dll" "$P/Unity.RenderPipeline.Universal.ShaderLibrary.dll"
           # Core stub(源码真实化)
-          S=ExportedProject/ExportedProject/Assets/Scripts/Assembly-CSharp
+          S=ExportedProject/ExportedProject/Assets/Scripts
           mkdir -p ExportedProject/ExportedProject/Assets/CoreSrc
           cat > ExportedProject/ExportedProject/Assets/CoreSrc/Singleton.cs <<'EOF'
           namespace Core {
