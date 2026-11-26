@@ -288,8 +288,14 @@ jobs:
             mv /tmp/clt/cmdline-tools "$SDK/cmdline-tools/latest"
           fi
           chmod +x "$SDK/cmdline-tools/latest/bin/"* || true
+          # sdkmanager(class 61)需要 Java 17:用 runner 的 Temurin 17
+          export JAVA_HOME="${JAVA_HOME_17_arm64:-$JAVA_HOME_17_X64}"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          java -version 2>&1 | head -1
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" --licenses > /dev/null 2>&1 || true
           "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" "platform-tools" "platforms;android-33" "build-tools;33.0.2" > /dev/null 2>&1 || true
+          # Unity 的 JDK 检测也指向 17(BuildPlayer 时的 ListComponentsVersions 同样要 17)
+          defaults write com.unity3d.UnityEditor5.x JdkRoot "$JAVA_HOME" 2>/dev/null || true
           ls "$SDK" | head -8
 
       - name: 修复-构建迭代循环(Android,20 轮)
