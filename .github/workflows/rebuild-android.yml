@@ -247,26 +247,7 @@ jobs:
           using System.IO;
           public static class CIPrepareAndroid {
               public static void PrepareAndBuild() {
-                  // keystore(不存在则用 keytool 生成)
-                  var ks = "/tmp/pvz-debug.keystore";
-                  if (!File.Exists(ks)) {
-                      var jdk = "/Applications/Unity/PlaybackEngines/AndroidPlayer/OpenJDK/bin/keytool";
-                      var psi = new System.Diagnostics.ProcessStartInfo {
-                          FileName = jdk,
-                          Arguments = "-genkeypair -v -keystore " + ks +
-                              " -alias pvz -keyalg RSA -keysize 2048 -validity 10000" +
-                              " -storepass pvzfusion -keypass pvzfusion" +
-                              " -dname \"CN=PVZ Fusion, OU=Game, O=PVZ, L=Web, S=Web, C=CN\"",
-                          UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
-                      };
-                      var p = System.Diagnostics.Process.Start(psi);
-                      p.WaitForExit(30000);
-                      Debug.Log("[CI] keystore generated: " + File.Exists(ks));
-                  }
-                  PlayerSettings.Android.keystoreName = ks;
-                  PlayerSettings.Android.keystorePass = "pvzfusion";
-                  PlayerSettings.Android.keyaliasName = "pvz";
-                  PlayerSettings.Android.keyaliasPass = "pvzfusion";
+                  // 不配置 keystore:Unity 对未指定签名的 Android build 自动使用 debug 签名
                   PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel24;
 
                   var scenes = Directory.GetFiles("Assets", "*.unity", SearchOption.AllDirectories)
