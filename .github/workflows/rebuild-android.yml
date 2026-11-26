@@ -296,7 +296,8 @@ jobs:
           "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" "platform-tools" "platforms;android-33" "build-tools;33.0.2" > /dev/null 2>&1 || true
           # Unity 进程内嵌 OpenJDK 是 11(sdkmanager 要 17)→ 整个替换为 17 符号链接
           sudo rm -rf /Applications/Unity/PlaybackEngines/AndroidPlayer/OpenJDK
-          sudo ln -sfn "$JAVA_HOME" /Applications/Unity/PlaybackEngines/AndroidPlayer/OpenJDK
+          # mac JDK 布局:arm64/Contents/Home → Unity 期望 OpenJDK/Contents/Home,指向 arm64 层
+          sudo ln -sfn "$(dirname "$JAVA_HOME")" /Applications/Unity/PlaybackEngines/AndroidPlayer/OpenJDK
           "/Applications/Unity/PlaybackEngines/AndroidPlayer/OpenJDK/bin/java" -version 2>&1 | head -1
           ls "$SDK" | head -8
 
