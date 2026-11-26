@@ -4,6 +4,7 @@
 //     (GameAPP.board → GameObject.GetComponent(typeof(Board)) → Board.theSun)
 #include "tweak_main.h"
 #include "pvz_tweak.h"
+#include "tweak_ctl.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -177,11 +178,14 @@ typedef struct {
     int      is_static;
     int      type_kind;    // 0=int 1=float 2=bool 3=long
     long     target;
+    char     fname[64];    // 字段名(菜单开关匹配)
     void    *holder_static_field;
     void    *chain_method;
     void    *chain_type_obj;
 } ResolvedFeature;
 
+static int save_t0_external = 0;  // 菜单触发立即落盘
+static int t0_reset = 0;          // 菜单触发跳转计时重置
 static ResolvedFeature g_feats[UNITY_MAX_FEATURES];
 static int g_feat_count = 0;
 
@@ -193,6 +197,7 @@ static void resolve_feature(void *image, UnityFeature *uf, ResolvedFeature *rf) 
     if (!field) { TWEAK_LOG("unity: field %s.%s not found", uf->klass, uf->field); return; }
     int flags = p_field_get_flags ? p_field_get_flags(field) : 0;
     rf->field = field;
+    snprintf(rf->fname, sizeof(rf->fname), "%s", uf->field);
     rf->is_static = (flags & 0x10) ? 1 : 0;
     rf->target = parse_value(uf->value_s);
     rf->type_kind = strcmp(uf->type, "float") == 0 ? 1 :
@@ -454,7 +459,10 @@ void *unity_worker(void *arg) {
             if (bf) p_field_static_get_value(bf, &board_go);
         }
 
+        // 菜单触发:立即落盘
+        if (save_t0_external) { do_save_flush(image); save_t0_external = 0; }
         // 模式跳转(延迟执行)
+        if (t0_reset) { t0 = 0; t0_reset = 0; }
         if (g_jump.mode[0] && !g_jump.done) {
             long long now = t0 += (cfg->poll_ms > 0 ? cfg->poll_ms : 300);
             (void)now;
@@ -476,4 +484,56 @@ void *unity_worker(void *arg) {
         int pm = cfg->poll_ms > 0 ? cfg->poll_ms : 300;
         usleep(pm * 1000);
     }
+}
+
+// ---- 菜单控制接口(menu.m 调用) ----
+static int find_feat_by_field(const char *fname) {
+    for (int i = 0; i < g_feat_count; i++)
+        if (g_feats[i].active && g_feats[i].field) {
+            // 用字段名匹配(启动时记录)
+            if (strstr(g_feats[i].fname, fname)) return i;
+        }
+    return -1;
+}
+
+int ctl_sun_enabled(void) {
+    int i = find_feat_by_field("theSun");
+    return i >= 0 && g_feats[i].active;
+}
+int ctl_money_enabled(void) {
+    int i = find_feat_by_field("theMoneyCount");
+    return i >= 0 && g_feats[i].active;
+}
+int ctl_seed_all_pending(void) { return g_seed_all; }
+int ctl_place_enabled(void) { return g_place_on_mouse; }
+
+void ctl_sun_toggle(void) {
+    int i = find_feat_by_field("theSun");
+    if (i >= 0) { g_feats[i].active = !g_feats[i].active; TWEAK_LOG("menu: sun lock %s", g_feats[i].active ? "ON" : "OFF"); }
+}
+void ctl_money_toggle(void) {
+    int i = find_feat_by_field("theMoneyCount");
+    if (i >= 0) { g_feats[i].active = !g_feats[i].active; TWEAK_LOG("menu: money lock %s", g_feats[i].active ? "ON" : "OFF"); }
+}
+void ctl_seed_all_fire(void) {
+    g_seed_all = 1;
+    TWEAK_LOG("menu: seed_all fired");
+}
+void ctl_place_toggle(int plant) {
+    if (plant >= 0) g_place_planttype = plant;
+    g_place_on_mouse = !g_place_on_mouse;
+    TWEAK_LOG("menu: place_on_mouse %s (type=%d)", g_place_on_mouse ? "ON" : "OFF", g_place_planttype);
+}
+void ctl_save_now(void) {
+    g_save_flush_ms = g_save_flush_ms > 0 ? g_save_flush_ms : 60000;
+    save_t0_external = 1; // 触发立即落盘
+    TWEAK_LOG("menu: save now");
+}
+void ctl_jump(const char *mode, int level) {
+    snprintf(g_jump.mode, sizeof(g_jump.mode), "%s", mode);
+    g_jump.level = level;
+    g_jump.done = 0;
+    g_jump.delay_ms = 500; // 菜单触发时立即(500ms 内)
+    t0_reset = 1;
+    TWEAK_LOG("menu: jump %s level=%d", mode, level);
 }
