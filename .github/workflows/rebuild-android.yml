@@ -249,6 +249,9 @@ jobs:
               public static void PrepareAndBuild() {
                   // 不配置 keystore:Unity 对未指定签名的 Android build 自动使用 debug 签名
                   PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel24;
+                  // il2cpp 必须显式指定目标架构(否则 "Target architecture not specified")
+                  PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
+                  PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
 
                   var scenes = Directory.GetFiles("Assets", "*.unity", SearchOption.AllDirectories)
                       .Where(p => !p.Contains("/Plugins/"))
