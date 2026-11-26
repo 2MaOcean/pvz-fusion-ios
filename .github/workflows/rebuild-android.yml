@@ -271,6 +271,26 @@ jobs:
           CS
           echo "CIPrepareAndroid injected"
 
+      - name: 补 SDK cmdline-tools + licenses
+        run: |
+          set -x
+          SDK=/Applications/Unity/PlaybackEngines/AndroidPlayer/SDK
+          mkdir -p "$SDK/cmdline-tools"
+          if [ ! -d "$SDK/cmdline-tools/latest" ]; then
+            for i in 1 2 3; do
+              curl -sL --retry 3 --retry-all-errors -o /tmp/clt.zip \
+                "https://dl.google.com/android/repository/commandlinetools-mac-11076708_latest.zip" && break
+              sleep 10
+            done
+            unzip -q /tmp/clt.zip -d /tmp/clt
+            rm -rf "$SDK/cmdline-tools/latest"
+            mv /tmp/clt/cmdline-tools "$SDK/cmdline-tools/latest"
+          fi
+          chmod +x "$SDK/cmdline-tools/latest/bin/"* || true
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" --licenses > /dev/null 2>&1 || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" "platform-tools" "platforms;android-33" "build-tools;33.0.2" > /dev/null 2>&1 || true
+          ls "$SDK" | head -8
+
       - name: 修复-构建迭代循环(Android,20 轮)
         run: |
           set -x
