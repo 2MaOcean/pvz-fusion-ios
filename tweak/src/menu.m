@@ -2,6 +2,8 @@
 // 悬浮球(可拖动)→ ActionSheet:阳光/金币锁定、全卡池、任意放置、
 // 模式跳转(我是僵尸/冒险/挑战/塔/宝藏)、存档落盘
 #import <UIKit/UIKit.h>
+#include <pthread.h>
+#include <unistd.h>
 #import <objc/runtime.h>
 #include "tweak_ctl.h"
 
@@ -75,7 +77,7 @@ static void setup_ball(void) {
     if (g_window) return;
     if (![UIApplication sharedApplication]) return;
 
-    PvZBallButton *btn = [PvzBallButton buttonWithType:UIButtonTypeCustom];
+    PvZBallButton *btn = [PvZBallButton buttonWithType:UIButtonTypeCustom];
     CGFloat size = 56;
     btn.frame = CGRectMake(12, 180, size, size);
     btn.backgroundColor = [UIColor colorWithWhite:0 alpha:0.55];
@@ -86,7 +88,7 @@ static void setup_ball(void) {
     [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     btn.titleLabel.font = [UIFont boldSystemFontOfSize:15];
 
-    PvZBallButton __weak *wbtn = btn;
+    PvZBallButton __unsafe_unretained *wbtn = btn;
     btn.onTap = ^{ show_menu(); };
     btn.onPan = ^(CGPoint d) {
         CGRect f = wbtn.frame;
